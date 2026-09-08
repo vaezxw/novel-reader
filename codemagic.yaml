@@ -25,7 +25,7 @@ workflows:
       - name: Install CocoaPods dependencies
         script: |
           cd ios
-          pod install
+          pod install --repo-update
       - name: Build iOS (no codesign)
         script: |
           flutter build ios --release --no-codesign
