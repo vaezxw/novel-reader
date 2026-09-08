@@ -64,7 +64,8 @@ workflows:
   android-release-apk:
     name: Android Release APK
     max_build_duration: 45
-    instance_type: linux_x2
+    # Free plan usually has mac_mini_m2; linux_x2 needs a paid plan.
+    instance_type: mac_mini_m2
     environment:
       flutter: stable
       vars:
