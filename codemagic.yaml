@@ -3,15 +3,6 @@ workflows:
     name: iOS Unsigned IPA (Sideloadly)
     max_build_duration: 60
     instance_type: mac_mini_m2
-    # Manual start in Codemagic UI — saves free build minutes.
-    # To auto-build on push, uncomment triggering below.
-    # triggering:
-    #   events:
-    #     - push
-    #   branch_patterns:
-    #     - pattern: main
-    #       include: true
-    #       source: true
     environment:
       flutter: stable
       xcode: latest
@@ -19,23 +10,40 @@ workflows:
       vars:
         APP_NAME: InkShelf
     scripts:
+      - name: Disable Swift Package Manager
+        script: |
+          flutter config --no-enable-swift-package-manager
       - name: Get Flutter packages
         script: |
           flutter pub get
       - name: Install CocoaPods dependencies
         script: |
           cd ios
+          rm -rf Pods Podfile.lock .symlinks
           pod install --repo-update
-      - name: Build iOS (no codesign)
+      - name: Build iOS unsigned
         script: |
+          set -euo pipefail
+          # Ensure Generated.xcconfig also disables signing (Flutter may regenerate it).
+          {
+            echo 'CODE_SIGNING_ALLOWED=NO'
+            echo 'CODE_SIGNING_REQUIRED=NO'
+            echo 'CODE_SIGN_IDENTITY='
+            echo 'DEVELOPMENT_TEAM=INKSLF0001'
+            echo 'PROVISIONING_PROFILE_SPECIFIER='
+          } >> ios/Flutter/Generated.xcconfig
+
           flutter build ios --release --no-codesign
       - name: Package unsigned IPA for Sideloadly
         script: |
           set -euo pipefail
-          APP_PATH="$(find build/ios/iphoneos -name '*.app' -maxdepth 1 | head -n 1)"
+          APP_PATH="$(find build/ios/iphoneos -name 'Runner.app' -type d | head -n 1)"
           if [ -z "${APP_PATH}" ]; then
-            echo "Runner.app not found under build/ios/iphoneos"
-            find build/ios -maxdepth 3 -type d -print || true
+            APP_PATH="$(find build/ios -name 'Runner.app' -type d | head -n 1)"
+          fi
+          if [ -z "${APP_PATH}" ]; then
+            echo "Runner.app not found"
+            find build/ios -maxdepth 6 -type d -print || true
             exit 1
           fi
           echo "Packaging: ${APP_PATH}"
@@ -52,7 +60,6 @@ workflows:
     artifacts:
       - build/ios/ipa/*.ipa
       - /tmp/xcodebuild_logs/*.log
-      - flutter_drive.log
 
   android-release-apk:
     name: Android Release APK
