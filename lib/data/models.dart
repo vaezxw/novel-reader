@@ -1,0 +1,184 @@
+class Book {
+  const Book({
+    required this.id,
+    required this.title,
+    required this.fileName,
+    required this.chapterCount,
+    required this.addedAt,
+    this.author,
+    this.lastReadAt,
+    this.lastChapterIndex = 0,
+    this.lastScrollOffset = 0,
+    this.origin = BookOrigin.local,
+    this.sourceId,
+    this.bookUrl,
+  });
+
+  final String id;
+  final String title;
+  final String? author;
+  final String fileName;
+  final int chapterCount;
+  final DateTime addedAt;
+  final DateTime? lastReadAt;
+  final int lastChapterIndex;
+  final double lastScrollOffset;
+  final BookOrigin origin;
+  final String? sourceId;
+  final String? bookUrl;
+
+  bool get isRemote => origin == BookOrigin.remote;
+
+  double get progress {
+    if (chapterCount <= 0) return 0;
+    final chapterProgress =
+        (lastChapterIndex.clamp(0, chapterCount - 1) + 0.01) / chapterCount;
+    return chapterProgress.clamp(0.0, 1.0);
+  }
+
+  Book copyWith({
+    String? title,
+    String? author,
+    int? chapterCount,
+    DateTime? lastReadAt,
+    int? lastChapterIndex,
+    double? lastScrollOffset,
+    BookOrigin? origin,
+    String? sourceId,
+    String? bookUrl,
+  }) {
+    return Book(
+      id: id,
+      title: title ?? this.title,
+      author: author ?? this.author,
+      fileName: fileName,
+      chapterCount: chapterCount ?? this.chapterCount,
+      addedAt: addedAt,
+      lastReadAt: lastReadAt ?? this.lastReadAt,
+      lastChapterIndex: lastChapterIndex ?? this.lastChapterIndex,
+      lastScrollOffset: lastScrollOffset ?? this.lastScrollOffset,
+      origin: origin ?? this.origin,
+      sourceId: sourceId ?? this.sourceId,
+      bookUrl: bookUrl ?? this.bookUrl,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'title': title,
+        'author': author,
+        'fileName': fileName,
+        'chapterCount': chapterCount,
+        'addedAt': addedAt.toIso8601String(),
+        'lastReadAt': lastReadAt?.toIso8601String(),
+        'lastChapterIndex': lastChapterIndex,
+        'lastScrollOffset': lastScrollOffset,
+        'origin': origin.name,
+        'sourceId': sourceId,
+        'bookUrl': bookUrl,
+      };
+
+  factory Book.fromJson(Map<String, dynamic> json) {
+    return Book(
+      id: json['id'] as String,
+      title: json['title'] as String,
+      author: json['author'] as String?,
+      fileName: json['fileName'] as String? ?? '',
+      chapterCount: json['chapterCount'] as int? ?? 0,
+      addedAt: DateTime.parse(json['addedAt'] as String),
+      lastReadAt: json['lastReadAt'] == null
+          ? null
+          : DateTime.parse(json['lastReadAt'] as String),
+      lastChapterIndex: json['lastChapterIndex'] as int? ?? 0,
+      lastScrollOffset: (json['lastScrollOffset'] as num?)?.toDouble() ?? 0,
+      origin: BookOrigin.values.firstWhere(
+        (e) => e.name == json['origin'],
+        orElse: () => BookOrigin.local,
+      ),
+      sourceId: json['sourceId'] as String?,
+      bookUrl: json['bookUrl'] as String?,
+    );
+  }
+}
+
+enum BookOrigin { local, remote }
+
+class ChapterRef {
+  const ChapterRef({
+    required this.index,
+    required this.title,
+    this.start = 0,
+    this.end = 0,
+    this.url,
+  });
+
+  final int index;
+  final String title;
+  final int start;
+  final int end;
+  final String? url;
+
+  bool get isRemote => url != null && url!.isNotEmpty;
+
+  Map<String, dynamic> toJson() => {
+        'index': index,
+        'title': title,
+        'start': start,
+        'end': end,
+        'url': url,
+      };
+
+  factory ChapterRef.fromJson(Map<String, dynamic> json) {
+    return ChapterRef(
+      index: json['index'] as int,
+      title: json['title'] as String,
+      start: json['start'] as int? ?? 0,
+      end: json['end'] as int? ?? 0,
+      url: json['url'] as String?,
+    );
+  }
+}
+
+class ReaderPrefs {
+  const ReaderPrefs({
+    this.fontSize = 19,
+    this.lineHeight = 1.78,
+    this.forceDark = false,
+    this.followSystemTheme = true,
+  });
+
+  final double fontSize;
+  final double lineHeight;
+  final bool forceDark;
+  final bool followSystemTheme;
+
+  ReaderPrefs copyWith({
+    double? fontSize,
+    double? lineHeight,
+    bool? forceDark,
+    bool? followSystemTheme,
+  }) {
+    return ReaderPrefs(
+      fontSize: fontSize ?? this.fontSize,
+      lineHeight: lineHeight ?? this.lineHeight,
+      forceDark: forceDark ?? this.forceDark,
+      followSystemTheme: followSystemTheme ?? this.followSystemTheme,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'fontSize': fontSize,
+        'lineHeight': lineHeight,
+        'forceDark': forceDark,
+        'followSystemTheme': followSystemTheme,
+      };
+
+  factory ReaderPrefs.fromJson(Map<String, dynamic> json) {
+    return ReaderPrefs(
+      fontSize: (json['fontSize'] as num?)?.toDouble() ?? 19,
+      lineHeight: (json['lineHeight'] as num?)?.toDouble() ?? 1.78,
+      forceDark: json['forceDark'] as bool? ?? false,
+      followSystemTheme: json['followSystemTheme'] as bool? ?? true,
+    );
+  }
+}

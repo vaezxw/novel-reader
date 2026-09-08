@@ -1,0 +1,32 @@
+[
+  {
+    "bookSourceName": "示例书源（请替换为你自己的规则）",
+    "bookSourceUrl": "https://example.com",
+    "bookSourceType": 0,
+    "enabled": true,
+    "searchUrl": "/search?keyword={{key}}&page={{page}}",
+    "ruleSearch": {
+      "bookList": ".book-list .item",
+      "name": ".title@text",
+      "author": ".author@text",
+      "bookUrl": "a@href",
+      "coverUrl": "img@src",
+      "intro": ".intro@text"
+    },
+    "ruleBookInfo": {
+      "name": "h1@text",
+      "author": ".author@text",
+      "intro": ".intro@text",
+      "tocUrl": ""
+    },
+    "ruleToc": {
+      "chapterList": "#chapter-list li",
+      "chapterName": "a@text",
+      "chapterUrl": "a@href"
+    },
+    "ruleContent": {
+      "content": "#content@html",
+      "replaceRegex": ""
+    }
+  }
+]

@@ -1,0 +1,32 @@
+name: novel_reader
+description: InkShelf — local novel reader with bookshelf and book sources.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.9.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  flutter_riverpod: ^3.3.2
+  google_fonts: ^8.1.0
+  phosphor_flutter: ^2.1.0
+  file_picker: ^11.0.3
+  path_provider: ^2.1.5
+  path: ^1.9.1
+  intl: ^0.20.3
+  shared_preferences: ^2.5.5
+  uuid: ^4.6.0
+  charset_converter: ^2.3.0
+  dio: ^5.11.1
+  html: ^0.15.7
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true

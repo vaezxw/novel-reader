@@ -1,0 +1,73 @@
+workflows:
+  ios-unsigned-ipa:
+    name: iOS Unsigned IPA (Sideloadly)
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    # Manual start in Codemagic UI — saves free build minutes.
+    # To auto-build on push, uncomment triggering below.
+    # triggering:
+    #   events:
+    #     - push
+    #   branch_patterns:
+    #     - pattern: main
+    #       include: true
+    #       source: true
+    environment:
+      flutter: stable
+      xcode: latest
+      cocoapods: default
+      vars:
+        APP_NAME: InkShelf
+    scripts:
+      - name: Get Flutter packages
+        script: |
+          flutter pub get
+      - name: Install CocoaPods dependencies
+        script: |
+          cd ios
+          pod install
+      - name: Build iOS (no codesign)
+        script: |
+          flutter build ios --release --no-codesign
+      - name: Package unsigned IPA for Sideloadly
+        script: |
+          set -euo pipefail
+          APP_PATH="$(find build/ios/iphoneos -name '*.app' -maxdepth 1 | head -n 1)"
+          if [ -z "${APP_PATH}" ]; then
+            echo "Runner.app not found under build/ios/iphoneos"
+            find build/ios -maxdepth 3 -type d -print || true
+            exit 1
+          fi
+          echo "Packaging: ${APP_PATH}"
+          IPA_DIR="build/ios/ipa"
+          rm -rf "${IPA_DIR}"
+          mkdir -p "${IPA_DIR}/Payload"
+          cp -R "${APP_PATH}" "${IPA_DIR}/Payload/"
+          (
+            cd "${IPA_DIR}"
+            zip -qr "${APP_NAME}-unsigned.ipa" Payload
+            rm -rf Payload
+          )
+          ls -lah "${IPA_DIR}"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - flutter_drive.log
+
+  android-release-apk:
+    name: Android Release APK
+    max_build_duration: 45
+    instance_type: linux_x2
+    environment:
+      flutter: stable
+      vars:
+        APP_NAME: InkShelf
+    scripts:
+      - name: Get Flutter packages
+        script: |
+          flutter pub get
+      - name: Build APK
+        script: |
+          flutter build apk --release
+    artifacts:
+      - build/app/outputs/flutter-apk/*.apk
