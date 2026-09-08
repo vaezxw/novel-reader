@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../../data/models.dart';
 import '../../providers/library_providers.dart';
@@ -299,7 +298,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                                   }
                                 },
                                 icon: Icon(
-                                  PhosphorIconsRegular.caretLeft,
+                                  Icons.chevron_left,
                                   color: ink,
                                 ),
                               ),
@@ -319,7 +318,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                                 tooltip: '目录',
                                 onPressed: _openToc,
                                 icon: Icon(
-                                  PhosphorIconsRegular.listBullets,
+                                  Icons.format_list_bulleted,
                                   color: ink,
                                 ),
                               ),
@@ -327,7 +326,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
                                 tooltip: '阅读设置',
                                 onPressed: _openPrefs,
                                 icon: Icon(
-                                  PhosphorIconsRegular.textAa,
+                                  Icons.text_fields,
                                   color: ink,
                                 ),
                               ),
@@ -446,7 +445,7 @@ class _TocSheet extends StatelessWidget {
                 const Spacer(),
                 IconButton(
                   onPressed: () => Navigator.pop(context),
-                  icon: Icon(PhosphorIconsRegular.x),
+                  icon: Icon(Icons.close),
                 ),
               ],
             ),

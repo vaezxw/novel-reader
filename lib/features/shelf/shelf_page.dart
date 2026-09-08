@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../../data/models.dart';
 import '../../providers/library_providers.dart';
@@ -116,7 +115,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
             IconButton(
               tooltip: '导入 TXT',
               onPressed: _importTxt,
-              icon: Icon(PhosphorIconsRegular.fileArrowUp),
+              icon: Icon(Icons.upload_file),
             ),
           const SizedBox(width: 4),
         ],
@@ -147,7 +146,7 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
               Expanded(
                 child: books.isEmpty
                     ? EmptyState(
-                        icon: PhosphorIconsRegular.bookOpenText,
+                        icon: Icons.auto_stories_outlined,
                         title: '还没有书',
                         body: '导入 TXT，或从书源搜索后加入书架。',
                         actionLabel: '导入 TXT',
@@ -244,7 +243,7 @@ class _BookTile extends StatelessWidget {
               tooltip: '删除',
               onPressed: onDelete,
               icon: Icon(
-                PhosphorIconsRegular.trash,
+                Icons.delete_outline,
                 size: 18,
                 color: colors.onSurface.withValues(alpha: 0.35),
               ),

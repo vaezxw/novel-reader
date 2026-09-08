@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../features/settings/settings_page.dart';
 import '../features/shelf/shelf_page.dart';
@@ -28,20 +27,20 @@ class _HomeShellState extends State<HomeShell> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (value) => setState(() => _index = value),
-        destinations: [
+        destinations: const [
           NavigationDestination(
-            icon: Icon(PhosphorIconsRegular.books),
-            selectedIcon: Icon(PhosphorIconsFill.books),
+            icon: Icon(Icons.menu_book_outlined),
+            selectedIcon: Icon(Icons.menu_book),
             label: '书架',
           ),
           NavigationDestination(
-            icon: Icon(PhosphorIconsRegular.planet),
-            selectedIcon: Icon(PhosphorIconsFill.planet),
+            icon: Icon(Icons.travel_explore_outlined),
+            selectedIcon: Icon(Icons.travel_explore),
             label: '书源',
           ),
           NavigationDestination(
-            icon: Icon(PhosphorIconsRegular.slidersHorizontal),
-            selectedIcon: Icon(PhosphorIconsFill.slidersHorizontal),
+            icon: Icon(Icons.tune_outlined),
+            selectedIcon: Icon(Icons.tune),
             label: '设置',
           ),
         ],

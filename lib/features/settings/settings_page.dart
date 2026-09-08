@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../../data/models.dart';
 import '../../providers/library_providers.dart';
@@ -31,13 +30,13 @@ class SettingsPage extends ConsumerWidget {
           ),
           Divider(height: 1, color: colors.outline),
           _SettingsTile(
-            icon: PhosphorIconsRegular.textAa,
+            icon: Icons.text_fields,
             title: '默认字号',
             subtitle: prefs == null ? '…' : '${prefs.fontSize.round()}',
             onTap: () => _adjustFont(context, ref),
           ),
           _SettingsTile(
-            icon: PhosphorIconsRegular.moonStars,
+            icon: Icons.dark_mode_outlined,
             title: '阅读外观',
             subtitle: prefs == null
                 ? '…'
@@ -47,7 +46,7 @@ class SettingsPage extends ConsumerWidget {
             onTap: () => _cycleTheme(ref),
           ),
           _SettingsTile(
-            icon: PhosphorIconsRegular.broom,
+            icon: Icons.cleaning_services_outlined,
             title: '清理缓存',
             subtitle: '在书架删除书籍即可清除对应缓存',
             onTap: () {
@@ -168,7 +167,7 @@ class _SettingsTile extends StatelessWidget {
         ),
       ),
       trailing: Icon(
-        PhosphorIconsRegular.caretRight,
+        Icons.chevron_right,
         size: 16,
         color: colors.onSurface.withValues(alpha: 0.35),
       ),

@@ -4,7 +4,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:phosphor_flutter/phosphor_flutter.dart';
 
 import '../../data/source_models.dart';
 import '../../providers/library_providers.dart';
@@ -215,12 +214,12 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
             IconButton(
               tooltip: '从文件导入',
               onPressed: _importFromFile,
-              icon: Icon(PhosphorIconsRegular.fileArrowUp),
+              icon: Icon(Icons.upload_file),
             ),
             IconButton(
               tooltip: '粘贴 JSON',
               onPressed: _importFromPaste,
-              icon: Icon(PhosphorIconsRegular.plus),
+              icon: Icon(Icons.add),
             ),
           ],
           const SizedBox(width: 4),
@@ -245,7 +244,7 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
             data: (sources) {
               if (sources.isEmpty) {
                 return EmptyState(
-                  icon: PhosphorIconsRegular.planet,
+                  icon: Icons.travel_explore_outlined,
                   title: '还没有书源',
                   body: '粘贴或导入书源 JSON 后即可搜索。不预置任何书源。',
                   actionLabel: '粘贴 JSON',
@@ -292,7 +291,7 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
                         _toast('已删除书源');
                       },
                       icon: Icon(
-                        PhosphorIconsRegular.trash,
+                        Icons.delete_outline,
                         size: 18,
                         color: colors.onSurface.withValues(alpha: 0.35),
                       ),
@@ -316,7 +315,7 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
                         decoration: InputDecoration(
                           hintText: '搜索书名',
                           hintStyle: GoogleFonts.notoSansSc(fontSize: 14),
-                          prefixIcon: Icon(PhosphorIconsRegular.magnifyingGlass),
+                          prefixIcon: Icon(Icons.search),
                           filled: true,
                           fillColor: colors.surface,
                           border: OutlineInputBorder(
@@ -368,7 +367,7 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
               Expanded(
                 child: _hits.isEmpty
                     ? EmptyState(
-                        icon: PhosphorIconsRegular.magnifyingGlass,
+                        icon: Icons.search,
                         title: '搜索网络书籍',
                         body: '使用已启用的书源搜索，再加入本地书架阅读。',
                       )
