@@ -21,6 +21,8 @@ dependencies:
   charset_converter: ^2.3.0
   dio: ^5.11.1
   html: ^0.15.7
+  flutter_tts: ^4.2.3
+  screen_brightness: ^2.1.7
 
 dev_dependencies:
   flutter_test:

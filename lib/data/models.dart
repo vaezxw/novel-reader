@@ -1,3 +1,11 @@
+enum BookOrigin { local, remote }
+
+enum ReadMode {
+  horizontalChapter,
+  verticalScroll,
+  pageFlip,
+}
+
 class Book {
   const Book({
     required this.id,
@@ -12,6 +20,9 @@ class Book {
     this.origin = BookOrigin.local,
     this.sourceId,
     this.bookUrl,
+    this.coverUrl,
+    this.intro,
+    this.sourceName,
   });
 
   final String id;
@@ -26,6 +37,9 @@ class Book {
   final BookOrigin origin;
   final String? sourceId;
   final String? bookUrl;
+  final String? coverUrl;
+  final String? intro;
+  final String? sourceName;
 
   bool get isRemote => origin == BookOrigin.remote;
 
@@ -46,6 +60,9 @@ class Book {
     BookOrigin? origin,
     String? sourceId,
     String? bookUrl,
+    String? coverUrl,
+    String? intro,
+    String? sourceName,
   }) {
     return Book(
       id: id,
@@ -60,6 +77,9 @@ class Book {
       origin: origin ?? this.origin,
       sourceId: sourceId ?? this.sourceId,
       bookUrl: bookUrl ?? this.bookUrl,
+      coverUrl: coverUrl ?? this.coverUrl,
+      intro: intro ?? this.intro,
+      sourceName: sourceName ?? this.sourceName,
     );
   }
 
@@ -76,6 +96,9 @@ class Book {
         'origin': origin.name,
         'sourceId': sourceId,
         'bookUrl': bookUrl,
+        'coverUrl': coverUrl,
+        'intro': intro,
+        'sourceName': sourceName,
       };
 
   factory Book.fromJson(Map<String, dynamic> json) {
@@ -97,11 +120,12 @@ class Book {
       ),
       sourceId: json['sourceId'] as String?,
       bookUrl: json['bookUrl'] as String?,
+      coverUrl: json['coverUrl'] as String?,
+      intro: json['intro'] as String?,
+      sourceName: json['sourceName'] as String?,
     );
   }
 }
-
-enum BookOrigin { local, remote }
 
 class ChapterRef {
   const ChapterRef({
@@ -139,30 +163,85 @@ class ChapterRef {
   }
 }
 
+class Bookmark {
+  const Bookmark({
+    required this.id,
+    required this.chapterIndex,
+    required this.title,
+    required this.createdAt,
+    this.scrollOffset = 0,
+  });
+
+  final String id;
+  final int chapterIndex;
+  final String title;
+  final DateTime createdAt;
+  final double scrollOffset;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'chapterIndex': chapterIndex,
+        'title': title,
+        'createdAt': createdAt.toIso8601String(),
+        'scrollOffset': scrollOffset,
+      };
+
+  factory Bookmark.fromJson(Map<String, dynamic> json) {
+    return Bookmark(
+      id: json['id'] as String,
+      chapterIndex: json['chapterIndex'] as int,
+      title: json['title'] as String? ?? '',
+      createdAt: DateTime.parse(json['createdAt'] as String),
+      scrollOffset: (json['scrollOffset'] as num?)?.toDouble() ?? 0,
+    );
+  }
+}
+
 class ReaderPrefs {
   const ReaderPrefs({
     this.fontSize = 19,
     this.lineHeight = 1.78,
     this.forceDark = false,
     this.followSystemTheme = true,
+    this.readMode = ReadMode.horizontalChapter,
+    this.autoReadEnabled = false,
+    this.autoReadSpeed = 1.0,
+    this.followSystemBrightness = true,
+    this.brightness = 0.7,
   });
 
   final double fontSize;
   final double lineHeight;
   final bool forceDark;
   final bool followSystemTheme;
+  final ReadMode readMode;
+  final bool autoReadEnabled;
+  final double autoReadSpeed;
+  final bool followSystemBrightness;
+  final double brightness;
 
   ReaderPrefs copyWith({
     double? fontSize,
     double? lineHeight,
     bool? forceDark,
     bool? followSystemTheme,
+    ReadMode? readMode,
+    bool? autoReadEnabled,
+    double? autoReadSpeed,
+    bool? followSystemBrightness,
+    double? brightness,
   }) {
     return ReaderPrefs(
       fontSize: fontSize ?? this.fontSize,
       lineHeight: lineHeight ?? this.lineHeight,
       forceDark: forceDark ?? this.forceDark,
       followSystemTheme: followSystemTheme ?? this.followSystemTheme,
+      readMode: readMode ?? this.readMode,
+      autoReadEnabled: autoReadEnabled ?? this.autoReadEnabled,
+      autoReadSpeed: autoReadSpeed ?? this.autoReadSpeed,
+      followSystemBrightness:
+          followSystemBrightness ?? this.followSystemBrightness,
+      brightness: brightness ?? this.brightness,
     );
   }
 
@@ -171,6 +250,11 @@ class ReaderPrefs {
         'lineHeight': lineHeight,
         'forceDark': forceDark,
         'followSystemTheme': followSystemTheme,
+        'readMode': readMode.name,
+        'autoReadEnabled': autoReadEnabled,
+        'autoReadSpeed': autoReadSpeed,
+        'followSystemBrightness': followSystemBrightness,
+        'brightness': brightness,
       };
 
   factory ReaderPrefs.fromJson(Map<String, dynamic> json) {
@@ -179,6 +263,20 @@ class ReaderPrefs {
       lineHeight: (json['lineHeight'] as num?)?.toDouble() ?? 1.78,
       forceDark: json['forceDark'] as bool? ?? false,
       followSystemTheme: json['followSystemTheme'] as bool? ?? true,
+      readMode: ReadMode.values.firstWhere(
+        (e) => e.name == json['readMode'],
+        orElse: () => ReadMode.horizontalChapter,
+      ),
+      autoReadEnabled: json['autoReadEnabled'] as bool? ?? false,
+      autoReadSpeed: (json['autoReadSpeed'] as num?)?.toDouble() ?? 1.0,
+      followSystemBrightness: json['followSystemBrightness'] as bool? ?? true,
+      brightness: (json['brightness'] as num?)?.toDouble() ?? 0.7,
     );
   }
+
+  String get readModeLabel => switch (readMode) {
+        ReadMode.horizontalChapter => '左右切章',
+        ReadMode.verticalScroll => '上下滚动',
+        ReadMode.pageFlip => '仿真翻页',
+      };
 }

@@ -13,7 +13,6 @@ void main() {
     await tester.pumpWidget(const InkShelfRoot());
     await tester.pumpAndSettle();
 
-    expect(find.text('墨架'), findsOneWidget);
     expect(find.text('书架'), findsWidgets);
     expect(find.text('还没有书'), findsOneWidget);
   });

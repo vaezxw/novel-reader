@@ -57,6 +57,13 @@ class BooksNotifier extends AsyncNotifier<List<Book>> {
     state = AsyncData(await _repo.loadBooks());
   }
 
+  Future<Book> refreshRemoteToc(String bookId) async {
+    final book = await _repo.refreshRemoteToc(bookId);
+    state = AsyncData(await _repo.loadBooks());
+    ref.invalidate(chaptersProvider(bookId));
+    return book;
+  }
+
   Future<void> saveProgress({
     required String bookId,
     required int chapterIndex,
@@ -109,6 +116,36 @@ final chaptersProvider =
     FutureProvider.family<List<ChapterRef>, String>((ref, bookId) async {
   return ref.read(libraryRepositoryProvider).loadChapters(bookId);
 });
+
+final bookmarksProvider =
+    FutureProvider.family<List<Bookmark>, String>((ref, bookId) async {
+  return ref.read(libraryRepositoryProvider).loadBookmarks(bookId);
+});
+
+Future<void> toggleBookmarkForBook(
+  WidgetRef ref, {
+  required String bookId,
+  required int chapterIndex,
+  required String title,
+  double scrollOffset = 0,
+}) async {
+  await ref.read(libraryRepositoryProvider).toggleBookmark(
+        bookId: bookId,
+        chapterIndex: chapterIndex,
+        title: title,
+        scrollOffset: scrollOffset,
+      );
+  ref.invalidate(bookmarksProvider(bookId));
+}
+
+Future<void> removeBookmarkForBook(
+  WidgetRef ref, {
+  required String bookId,
+  required String bookmarkId,
+}) async {
+  await ref.read(libraryRepositoryProvider).removeBookmark(bookId, bookmarkId);
+  ref.invalidate(bookmarksProvider(bookId));
+}
 
 final sourcesProvider =
     AsyncNotifierProvider<SourcesNotifier, List<BookSource>>(

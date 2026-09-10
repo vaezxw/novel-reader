@@ -18,15 +18,22 @@ $env:FLUTTER_STORAGE_BASE_URL = 'https://storage.flutter-io.cn'
 $env:Path = "E:\flutter\bin;$env:Path"
 ```
 
-## 运行
+## 运行 / 本地调试（Windows）
 
 ```powershell
+$env:Path = "E:\flutter\bin;$env:Path"
+$env:PUB_HOSTED_URL = "https://pub.flutter-io.cn"
+$env:FLUTTER_STORAGE_BASE_URL = "https://storage.flutter-io.cn"
 cd E:\novel-reader
 flutter pub get
-flutter run -d chrome
+flutter devices
+flutter run -d chrome          # 最快看 UI；TTS/亮度在 Web 上能力有限
+flutter run -d <androidId>     # 真机/模拟器（推荐测滑动、听书、亮度）
 ```
 
-日常优先用 Android 模拟器或真机。iOS 无 Mac 时走 Codemagic 出 IPA + Sideloadly 安装。
+- 改代码后终端里按 `r` 热重载，`R` 热重启，`q` 退出
+- 仿真翻页 / 听书 / 亮度以 **Android 或 iOS 真机** 为准
+- iOS 无 Mac 时仍用 Codemagic 出包 + Sideloadly
 
 ## 当前进度
 
@@ -34,12 +41,19 @@ flutter run -d chrome
 - [x] 本地 TXT 导入、自动分章、阅读页（进度/目录/字号行距/昼夜）
 - [x] 书源引擎（导入 JSON、搜索、加入书架、章节缓存）
 - [x] Codemagic iOS / Android 云构建配置（`codemagic.yaml`）
+- [x] 阅读三模式（左右切章 / 上下滚动 / 仿真翻页）、书签、目录搜索与回顶
+- [x] 自动阅读、听书(TTS)、亮度跟随系统
+- [x] 书籍详情、书源章节刷新、书架封面网格与搜索
 
 ## 阅读手势
 
 - 点屏幕中间：显示/隐藏工具栏
-- 点左侧：上一章；点右侧：下一章
-- 工具栏可打开目录与阅读设置
+- 点左侧 / 右侧：上一章或下一页（视翻页方式而定）
+- **翻页方式**（阅读设置 / 设置页，默认左右切章）：
+  - 左右切章：横向滑动切换章节
+  - 上下滚动：纵向滑动读本章
+  - 仿真翻页：章内分页左右翻，翻到头再切章
+- 工具栏：目录/书签、听书、阅读设置、书籍详情、章节刷新
 
 ## 书源
 

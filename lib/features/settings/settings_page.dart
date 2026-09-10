@@ -20,7 +20,7 @@ class SettingsPage extends ConsumerWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 8),
             child: Text(
-              '阅读偏好会同步到阅读页。',
+              '阅读偏好会同步到阅读页。听书与亮度请在阅读页工具栏操作。',
               style: GoogleFonts.notoSansSc(
                 fontSize: 13,
                 height: 1.5,
@@ -29,6 +29,12 @@ class SettingsPage extends ConsumerWidget {
             ),
           ),
           Divider(height: 1, color: colors.outline),
+          _SettingsTile(
+            icon: Icons.swipe,
+            title: '翻页方式',
+            subtitle: prefs?.readModeLabel ?? '…',
+            onTap: () => _pickReadMode(context, ref),
+          ),
           _SettingsTile(
             icon: Icons.text_fields,
             title: '默认字号',
@@ -44,6 +50,14 @@ class SettingsPage extends ConsumerWidget {
                     ? '跟随系统'
                     : (prefs.forceDark ? '夜间' : '纸面'),
             onTap: () => _cycleTheme(ref),
+          ),
+          _SettingsTile(
+            icon: Icons.speed,
+            title: '自动阅读速度',
+            subtitle: prefs == null
+                ? '…'
+                : '${prefs.autoReadSpeed.toStringAsFixed(1)}x',
+            onTap: () => _adjustAutoSpeed(context, ref),
           ),
           _SettingsTile(
             icon: Icons.cleaning_services_outlined,
@@ -81,6 +95,41 @@ class SettingsPage extends ConsumerWidget {
     );
   }
 
+  Future<void> _pickReadMode(BuildContext context, WidgetRef ref) async {
+    final current =
+        ref.read(readerPrefsProvider).value?.readMode ??
+            ReadMode.horizontalChapter;
+    final selected = await showModalBottomSheet<ReadMode>(
+      context: context,
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (final mode in ReadMode.values)
+                ListTile(
+                  title: Text(switch (mode) {
+                    ReadMode.horizontalChapter => '左右切章（默认）',
+                    ReadMode.verticalScroll => '上下滚动',
+                    ReadMode.pageFlip => '仿真翻页',
+                  }),
+                  trailing: mode == current
+                      ? const Icon(Icons.check)
+                      : null,
+                  onTap: () => Navigator.pop(context, mode),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+    if (selected != null) {
+      await ref.read(readerPrefsProvider.notifier).setPrefs(
+            (p) => p.copyWith(readMode: selected),
+          );
+    }
+  }
+
   Future<void> _adjustFont(BuildContext context, WidgetRef ref) async {
     await showModalBottomSheet<void>(
       context: context,
@@ -90,8 +139,7 @@ class SettingsPage extends ConsumerWidget {
           child: Consumer(
             builder: (context, ref, _) {
               final prefs =
-                  ref.watch(readerPrefsProvider).value ??
-                      const ReaderPrefs();
+                  ref.watch(readerPrefsProvider).value ?? const ReaderPrefs();
               return Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -111,6 +159,47 @@ class SettingsPage extends ConsumerWidget {
                     onChanged: (value) {
                       ref.read(readerPrefsProvider.notifier).setPrefs(
                             (p) => p.copyWith(fontSize: value),
+                          );
+                    },
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _adjustAutoSpeed(BuildContext context, WidgetRef ref) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (context) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+          child: Consumer(
+            builder: (context, ref, _) {
+              final prefs =
+                  ref.watch(readerPrefsProvider).value ?? const ReaderPrefs();
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    '自动阅读速度 ${prefs.autoReadSpeed.toStringAsFixed(1)}x',
+                    style: GoogleFonts.notoSansSc(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  Slider(
+                    value: prefs.autoReadSpeed,
+                    min: 0.4,
+                    max: 3.0,
+                    divisions: 13,
+                    onChanged: (value) {
+                      ref.read(readerPrefsProvider.notifier).setPrefs(
+                            (p) => p.copyWith(autoReadSpeed: value),
                           );
                     },
                   ),
