@@ -189,43 +189,94 @@ class SourceEngine {
     if (rule == null) {
       throw StateError('书源未配置 ruleContent');
     }
-    final body = await _getBody(chapterUrl, source);
-    final contentRule = rule['content'] as String?;
-    String content;
 
-    if (RuleSelector.isJsonRule(contentRule) ||
-        body.trimLeft().startsWith('{')) {
+    final buffer = StringBuffer();
+    final visited = <String>{};
+    var url = chapterUrl;
+    var pages = 0;
+    const maxPages = 30;
+
+    while (url.isNotEmpty && pages < maxPages && visited.add(url)) {
+      pages++;
+      final body = await _getBody(url, source);
+      final pageText = _extractContent(body, rule['content'] as String?);
+      if (pageText.isNotEmpty) {
+        if (buffer.isNotEmpty) buffer.writeln();
+        buffer.write(pageText);
+      }
+
+      final nextRule = rule['nextContentUrl'] as String?;
+      if (nextRule == null || nextRule.trim().isEmpty) break;
+
+      String? next;
+      if (RuleSelector.isJsonRule(nextRule) || body.trimLeft().startsWith('{')) {
+        final root = RuleSelector.decodeBody(body);
+        next = RuleSelector.jsonField(root, nextRule);
+      } else {
+        final doc = RuleSelector.parseHtml(body);
+        next = RuleSelector.resolveNextUrl(doc, nextRule);
+      }
+      final abs = _absUrl(url, next);
+      if (abs == null || abs == url) break;
+      url = abs;
+    }
+
+    var content = buffer.toString();
+    content = _applyReplaceRegex(content, rule['replaceRegex'] as String?);
+    return content.trim();
+  }
+
+  String _extractContent(String body, String? contentRule) {
+    if (contentRule == null || contentRule.trim().isEmpty) return '';
+
+    if (RuleSelector.isJsonRule(contentRule) || body.trimLeft().startsWith('{')) {
       final root = RuleSelector.decodeBody(body);
-      content = RuleSelector.jsonField(root, contentRule);
+      var content = RuleSelector.jsonField(root, contentRule);
       if (content.contains('<') && content.contains('>')) {
         content = RuleSelector.htmlToPlain(content);
       }
-    } else {
-      final doc = RuleSelector.parseHtml(body);
-      final (selector, attr) = RuleSelector.splitRule(contentRule ?? '');
-      if (attr == 'html' || attr == 'text') {
-        final html = RuleSelector.readFromDocument(
-          doc,
-          selector.isEmpty ? contentRule : '$selector@html',
-        );
-        content = RuleSelector.htmlToPlain(html.isEmpty
-            ? RuleSelector.readFromDocument(doc, contentRule)
-            : html);
+      return content;
+    }
+
+    final doc = RuleSelector.parseHtml(body);
+    final (base, replaces) = RuleSelector.splitAllInOne(contentRule);
+    final (selector, attr) = RuleSelector.splitRule(base);
+
+    String extracted;
+    if (attr == 'html') {
+      String html;
+      if (selector.isEmpty) {
+        html = doc.body?.innerHtml ?? '';
       } else {
-        content = RuleSelector.readFromDocument(doc, contentRule);
+        try {
+          html = doc.querySelector(selector)?.innerHtml ?? '';
+        } catch (_) {
+          html = '';
+        }
       }
+      extracted = RuleSelector.htmlToPlain(html);
+    } else {
+      extracted = RuleSelector.readFromDocument(doc, base);
     }
+    return RuleSelector.applyReplaces(extracted, replaces);
+  }
 
-    final replace = rule['replaceRegex'] as String?;
-    if (replace != null && replace.trim().isNotEmpty) {
-      try {
-        content = content.replaceAll(RegExp(replace), '');
-      } catch (_) {
-        content = content.replaceAll(replace, '');
-      }
+  String _applyReplaceRegex(String content, String? replace) {
+    if (replace == null || replace.trim().isEmpty) return content;
+    var out = content;
+    // Legado: pattern or pattern##replacement or ##pat##repl chains
+    if (replace.contains('##')) {
+      final normalized =
+          replace.startsWith('##') ? 'x$replace' : 'x##$replace';
+      final (_, replaces) = RuleSelector.splitAllInOne(normalized);
+      return RuleSelector.applyReplaces(out, replaces);
     }
-
-    return content.trim();
+    try {
+      out = out.replaceAll(RegExp(replace, dotAll: true), '');
+    } catch (_) {
+      out = out.replaceAll(replace, '');
+    }
+    return out;
   }
 
   Future<String> _getBody(String url, BookSource source) async {

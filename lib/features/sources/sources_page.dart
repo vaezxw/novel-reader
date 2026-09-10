@@ -49,14 +49,15 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('粘贴书源 JSON'),
+          title: const Text('粘贴书源 JSON / 链接'),
           content: SizedBox(
             width: 420,
             child: TextField(
               controller: controller,
               maxLines: 12,
               decoration: const InputDecoration(
-                hintText: '支持单个对象或数组，字段兼容阅读/Legado',
+                hintText:
+                    '支持 JSON 对象/数组，或 Gitee/GitHub 的 raw/blob 链接',
                 border: OutlineInputBorder(),
               ),
             ),

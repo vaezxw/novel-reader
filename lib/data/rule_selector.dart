@@ -4,12 +4,46 @@ import 'package:html/dom.dart';
 import 'package:html/parser.dart' as html_parser;
 
 /// Subset of Legado-style selectors:
-/// - CSS: `.item`, `div.list a`, `#content`
+/// - CSS: `.item`, `div.list a`, `#content`, `meta[property='og:title']`
 /// - Legado shortcuts: `class.item` → `.item`, `id.content` → `#content`
-/// - Attrs: `a@href`, `.title@text`, `#c@html`
+/// - Attrs: `a@href`, `.title@text`, `#c@html`, `meta@content`
+/// - Inline replace: `rule##regex##` or `rule##regex##replacement`
 /// - JSON: `$.data.list`, `$.name`, `name` (relative to object)
 class RuleSelector {
   RuleSelector._();
+
+  /// Splits Legado AllInOne suffix: `base##pat##repl##pat2##repl2`
+  static (String base, List<(String pattern, String replacement)>) splitAllInOne(
+    String rule,
+  ) {
+    final idx = rule.indexOf('##');
+    if (idx < 0) return (rule.trim(), const []);
+    final base = rule.substring(0, idx).trim();
+    final parts = rule.substring(idx + 2).split('##');
+    final replaces = <(String, String)>[];
+    for (var i = 0; i < parts.length; i += 2) {
+      final pattern = parts[i];
+      if (pattern.isEmpty) continue;
+      final replacement = i + 1 < parts.length ? parts[i + 1] : '';
+      replaces.add((pattern, replacement));
+    }
+    return (base, replaces);
+  }
+
+  static String applyReplaces(
+    String input,
+    List<(String pattern, String replacement)> replaces,
+  ) {
+    var out = input;
+    for (final (pattern, replacement) in replaces) {
+      try {
+        out = out.replaceAll(RegExp(pattern, dotAll: true), replacement);
+      } catch (_) {
+        out = out.replaceAll(pattern, replacement);
+      }
+    }
+    return out;
+  }
 
   static String normalizeCss(String rule) {
     var r = rule.trim();
@@ -21,10 +55,11 @@ class RuleSelector {
   }
 
   static (String selector, String attr) splitRule(String rule) {
-    final at = rule.lastIndexOf('@');
-    if (at <= 0) return (normalizeCss(rule), 'text');
-    final left = rule.substring(0, at).trim();
-    final right = rule.substring(at + 1).trim().toLowerCase();
+    final (base, _) = splitAllInOne(rule);
+    final at = base.lastIndexOf('@');
+    if (at <= 0) return (normalizeCss(base), 'text');
+    final left = base.substring(0, at).trim();
+    final right = base.substring(at + 1).trim().toLowerCase();
     if (left.isEmpty) return ('', right);
     return (normalizeCss(left), right);
   }
@@ -42,7 +77,8 @@ class RuleSelector {
 
   static String readFromElement(Element root, String? rule) {
     if (rule == null || rule.trim().isEmpty) return '';
-    final (selector, attr) = splitRule(rule);
+    final (base, replaces) = splitAllInOne(rule);
+    final (selector, attr) = splitRule(base);
     Element? node = root;
     if (selector.isNotEmpty) {
       try {
@@ -53,12 +89,13 @@ class RuleSelector {
       }
     }
     if (node == null) return '';
-    return _attr(node, attr);
+    return applyReplaces(_attr(node, attr), replaces);
   }
 
   static String readFromDocument(Document doc, String? rule) {
     if (rule == null || rule.trim().isEmpty) return '';
-    final (selector, attr) = splitRule(rule);
+    final (base, replaces) = splitAllInOne(rule);
+    final (selector, attr) = splitRule(base);
     Element? node;
     if (selector.isEmpty) {
       node = doc.body;
@@ -70,20 +107,27 @@ class RuleSelector {
       }
     }
     if (node == null) return '';
-    return _attr(node, attr);
+    return applyReplaces(_attr(node, attr), replaces);
   }
 
   static String _attr(Element node, String attr) {
     switch (attr) {
-      case 'href':
-      case 'src':
-      case 'value':
-        return node.attributes[attr] ?? '';
       case 'html':
         return node.innerHtml;
       case 'text':
-      default:
+      case 'textnodes':
         return node.text.trim();
+      case 'owntext':
+        return node.nodes
+            .whereType<Text>()
+            .map((t) => t.text)
+            .join()
+            .trim();
+      default:
+        // href / src / content / value / any HTML attribute
+        return node.attributes[attr] ??
+            node.attributes[attr.toLowerCase()] ??
+            '';
     }
   }
 
@@ -91,8 +135,57 @@ class RuleSelector {
 
   static bool isJsonRule(String? rule) {
     if (rule == null) return false;
+    final (base, _) = splitAllInOne(rule);
+    final t = base.trim();
+    return t.startsWith(r'$') || t.startsWith('[');
+  }
+
+  static bool looksLikeJs(String? rule) {
+    if (rule == null) return false;
     final t = rule.trim();
-    return t.startsWith('\$') || t.startsWith('[');
+    if (t.startsWith('@js:') || t.startsWith('<js>')) return true;
+    return t.contains('document.select') ||
+        t.contains('java.') ||
+        (t.contains('function') && t.contains('return'));
+  }
+
+  /// Resolve next-page URL from Legado `nextContentUrl` (CSS or simple JS).
+  static String? resolveNextUrl(Document doc, String? rule) {
+    if (rule == null || rule.trim().isEmpty) return null;
+    final raw = rule.trim();
+
+    if (looksLikeJs(raw) || raw.contains('下一页') || raw.contains('下一章')) {
+      final selectMatch = RegExp(
+        r'''document\.select\(\s*['"]([^'"]+)['"]\s*\)''',
+      ).firstMatch(raw);
+      final keywordMatch = RegExp(
+        r'''indexOf\(\s*['"]([^'"]+)['"]\s*\)''',
+      ).firstMatch(raw);
+      final keyword = keywordMatch?.group(1) ?? '下一页';
+      Iterable<Element> links;
+      if (selectMatch != null) {
+        try {
+          links = doc.querySelectorAll(selectMatch.group(1)!);
+        } catch (_) {
+          links = doc.querySelectorAll('a');
+        }
+      } else {
+        links = doc.querySelectorAll('a');
+      }
+      for (final link in links) {
+        if (link.text.contains(keyword)) {
+          final href = link.attributes['href']?.trim() ?? '';
+          if (href.isNotEmpty && href != '#' && !href.startsWith('javascript:')) {
+            return href;
+          }
+        }
+      }
+      return null;
+    }
+
+    final href = readFromDocument(doc, raw);
+    if (href.isEmpty) return null;
+    return href;
   }
 
   static dynamic decodeBody(String body) {
@@ -108,23 +201,25 @@ class RuleSelector {
       if (root is List) return root;
       return const [];
     }
-    final value = jsonPath(root, listRule);
+    final (base, _) = splitAllInOne(listRule);
+    final value = jsonPath(root, base);
     if (value is List) return value;
     return const [];
   }
 
   static String jsonField(dynamic item, String? rule) {
     if (rule == null || rule.trim().isEmpty) return '';
-    final value = jsonPath(item, rule);
+    final (base, replaces) = splitAllInOne(rule);
+    final value = jsonPath(item, base);
     if (value == null) return '';
-    return '$value'.trim();
+    return applyReplaces('$value'.trim(), replaces);
   }
 
   /// Supports `$.a.b`, `$.a.b[*]`, `$.a[*]`, and relative `a.b` / `name`.
   static dynamic jsonPath(dynamic root, String rule) {
     var path = rule.trim();
-    if (path.startsWith('\$.')) path = path.substring(2);
-    if (path.startsWith('\$')) path = path.substring(1);
+    if (path.startsWith(r'$.')) path = path.substring(2);
+    if (path.startsWith(r'$')) path = path.substring(1);
     if (path.startsWith('.')) path = path.substring(1);
     if (path.isEmpty) return root;
 
@@ -147,8 +242,6 @@ class RuleSelector {
       }
       if (wantAll) {
         if (current is List) {
-          // Keep list as current for final return; if more segments follow,
-          // flatten map fields later.
           continue;
         }
         return null;
