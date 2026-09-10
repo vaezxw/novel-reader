@@ -261,10 +261,9 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     final ms = (1800 / prefs.autoReadSpeed.clamp(0.4, 3.0)).round();
     _autoTimer = Timer.periodic(Duration(milliseconds: ms), (_) {
       if (!mounted || _loadingChapter) return;
-      final mode = prefs.readMode;
-      if (mode == ReadMode.pageFlip) {
+      if (prefs.readMode == ReadMode.pageFlip) {
         _pageFlipKey.currentState?.nextPageOrChapter();
-      } else if (mode == ReadMode.verticalScroll) {
+      } else {
         if (!_scrollController.hasClients) return;
         final next = _scrollController.offset + 120;
         final max = _scrollController.position.maxScrollExtent;
@@ -277,9 +276,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
             curve: Curves.easeOut,
           );
         }
-      } else {
-        // horizontalChapter: treat as next chapter periodically
-        _goChapter(_chapterIndex + 1);
       }
     });
   }
@@ -611,44 +607,15 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
           style: bodyStyle,
           titleStyle: titleStyle,
           onTapCenter: _toggleChrome,
+          // Chapter change is button-only; auto-read may still advance chapter.
           onPrevChapter: () => _goChapter(_chapterIndex - 1),
           onNextChapter: () => _goChapter(_chapterIndex + 1),
-        );
-      case ReadMode.horizontalChapter:
-        return _HorizontalChapterBody(
-          chapterIndex: _chapterIndex,
-          chapterCount: _chapters.length,
-          onPrev: () => _goChapter(_chapterIndex - 1),
-          onNext: () => _goChapter(_chapterIndex + 1),
-          onTapCenter: _toggleChrome,
-          child: _VerticalChapterContent(
-            scrollController: _scrollController,
-            title: chapterTitle,
-            titleStyle: titleStyle,
-            body: _chapterText ?? '',
-            bodyStyle: bodyStyle,
-            muted: muted,
-            lamp: lamp,
-            chapterIndex: _chapterIndex,
-            chapterCount: _chapters.length,
-            onPrev: () => _goChapter(_chapterIndex - 1),
-            onNext: () => _goChapter(_chapterIndex + 1),
-          ),
+          allowGestureChapterChange: false,
         );
       case ReadMode.verticalScroll:
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTapUp: (details) {
-            final width = MediaQuery.sizeOf(context).width;
-            final x = details.localPosition.dx;
-            if (x < width * 0.28) {
-              _goChapter(_chapterIndex - 1);
-            } else if (x > width * 0.72) {
-              _goChapter(_chapterIndex + 1);
-            } else {
-              _toggleChrome();
-            }
-          },
+          onTapUp: (_) => _toggleChrome(),
           child: _VerticalChapterContent(
             scrollController: _scrollController,
             title: chapterTitle,
@@ -664,51 +631,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
           ),
         );
     }
-  }
-}
-
-class _HorizontalChapterBody extends StatelessWidget {
-  const _HorizontalChapterBody({
-    required this.chapterIndex,
-    required this.chapterCount,
-    required this.onPrev,
-    required this.onNext,
-    required this.onTapCenter,
-    required this.child,
-  });
-
-  final int chapterIndex;
-  final int chapterCount;
-  final VoidCallback onPrev;
-  final VoidCallback onNext;
-  final VoidCallback onTapCenter;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onHorizontalDragEnd: (details) {
-        final v = details.primaryVelocity ?? 0;
-        if (v < -240) {
-          onNext();
-        } else if (v > 240) {
-          onPrev();
-        }
-      },
-      onTapUp: (details) {
-        final width = MediaQuery.sizeOf(context).width;
-        final x = details.localPosition.dx;
-        if (x < width * 0.28) {
-          onPrev();
-        } else if (x > width * 0.72) {
-          onNext();
-        } else {
-          onTapCenter();
-        }
-      },
-      child: child,
-    );
   }
 }
 
@@ -1045,9 +967,8 @@ class _ReaderPrefsSheet extends ConsumerWidget {
                 for (final mode in ReadMode.values)
                   ChoiceChip(
                     label: Text(switch (mode) {
-                      ReadMode.horizontalChapter => '左右切章',
+                      ReadMode.pageFlip => '左右翻页',
                       ReadMode.verticalScroll => '上下滚动',
-                      ReadMode.pageFlip => '仿真翻页',
                     }),
                     selected: prefs.readMode == mode,
                     onSelected: (_) {

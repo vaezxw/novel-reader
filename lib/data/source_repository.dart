@@ -140,6 +140,17 @@ class SourceRepository {
     return body;
   }
 
+  Future<String> exportJsonText() async {
+    final sources = await loadSources();
+    if (sources.isEmpty) {
+      throw const FormatException('没有可导出的书源');
+    }
+    final list = [
+      for (final s in sources) Map<String, dynamic>.from(s.raw),
+    ];
+    return const JsonEncoder.withIndent('  ').convert(list);
+  }
+
   Future<List<BookSource>> setEnabled(String id, bool enabled) async {
     final sources = await loadSources();
     final next = [

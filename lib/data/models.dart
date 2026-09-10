@@ -1,9 +1,8 @@
 enum BookOrigin { local, remote }
 
 enum ReadMode {
-  horizontalChapter,
-  verticalScroll,
   pageFlip,
+  verticalScroll,
 }
 
 class Book {
@@ -203,7 +202,7 @@ class ReaderPrefs {
     this.lineHeight = 1.78,
     this.forceDark = false,
     this.followSystemTheme = true,
-    this.readMode = ReadMode.horizontalChapter,
+    this.readMode = ReadMode.pageFlip,
     this.autoReadEnabled = false,
     this.autoReadSpeed = 1.0,
     this.followSystemBrightness = true,
@@ -263,10 +262,7 @@ class ReaderPrefs {
       lineHeight: (json['lineHeight'] as num?)?.toDouble() ?? 1.78,
       forceDark: json['forceDark'] as bool? ?? false,
       followSystemTheme: json['followSystemTheme'] as bool? ?? true,
-      readMode: ReadMode.values.firstWhere(
-        (e) => e.name == json['readMode'],
-        orElse: () => ReadMode.horizontalChapter,
-      ),
+      readMode: _parseReadMode(json['readMode']),
       autoReadEnabled: json['autoReadEnabled'] as bool? ?? false,
       autoReadSpeed: (json['autoReadSpeed'] as num?)?.toDouble() ?? 1.0,
       followSystemBrightness: json['followSystemBrightness'] as bool? ?? true,
@@ -274,9 +270,15 @@ class ReaderPrefs {
     );
   }
 
+  static ReadMode _parseReadMode(Object? raw) {
+    final name = raw as String?;
+    if (name == 'verticalScroll') return ReadMode.verticalScroll;
+    // Legacy horizontalChapter (swipe to change chapter) → pageFlip
+    return ReadMode.pageFlip;
+  }
+
   String get readModeLabel => switch (readMode) {
-        ReadMode.horizontalChapter => '左右切章',
+        ReadMode.pageFlip => '左右翻页',
         ReadMode.verticalScroll => '上下滚动',
-        ReadMode.pageFlip => '仿真翻页',
       };
 }

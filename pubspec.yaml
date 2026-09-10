@@ -23,6 +23,7 @@ dependencies:
   html: ^0.15.7
   flutter_tts: ^4.2.3
   screen_brightness: ^2.1.7
+  share_plus: ^11.0.0
 
 dev_dependencies:
   flutter_test:

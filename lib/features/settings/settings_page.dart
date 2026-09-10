@@ -97,8 +97,7 @@ class SettingsPage extends ConsumerWidget {
 
   Future<void> _pickReadMode(BuildContext context, WidgetRef ref) async {
     final current =
-        ref.read(readerPrefsProvider).value?.readMode ??
-            ReadMode.horizontalChapter;
+        ref.read(readerPrefsProvider).value?.readMode ?? ReadMode.pageFlip;
     final selected = await showModalBottomSheet<ReadMode>(
       context: context,
       builder: (context) {
@@ -109,13 +108,10 @@ class SettingsPage extends ConsumerWidget {
               for (final mode in ReadMode.values)
                 ListTile(
                   title: Text(switch (mode) {
-                    ReadMode.horizontalChapter => '左右切章（默认）',
+                    ReadMode.pageFlip => '左右翻页（默认）',
                     ReadMode.verticalScroll => '上下滚动',
-                    ReadMode.pageFlip => '仿真翻页',
                   }),
-                  trailing: mode == current
-                      ? const Icon(Icons.check)
-                      : null,
+                  trailing: mode == current ? const Icon(Icons.check) : null,
                   onTap: () => Navigator.pop(context, mode),
                 ),
             ],

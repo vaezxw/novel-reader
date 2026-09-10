@@ -3,7 +3,7 @@ import 'package:google_fonts/google_fonts.dart';
 
 import 'page_paginator.dart';
 
-/// Horizontal page-flip within a chapter; notifies when user swipes past edges.
+/// Horizontal page-flip within a chapter body.
 class PageFlipView extends StatefulWidget {
   const PageFlipView({
     super.key,
@@ -14,6 +14,7 @@ class PageFlipView extends StatefulWidget {
     required this.onTapCenter,
     required this.onPrevChapter,
     required this.onNextChapter,
+    this.allowGestureChapterChange = false,
     this.controller,
     this.initialPage = 0,
   });
@@ -25,6 +26,9 @@ class PageFlipView extends StatefulWidget {
   final VoidCallback onTapCenter;
   final VoidCallback onPrevChapter;
   final VoidCallback onNextChapter;
+  /// When false, edge swipe/tap only flips pages; chapter change is button-only.
+  /// Auto-read still uses [onNextChapter] via [nextPageOrChapter].
+  final bool allowGestureChapterChange;
   final PageController? controller;
   final int initialPage;
 
@@ -56,8 +60,8 @@ class PageFlipViewState extends State<PageFlipView> {
   @override
   void initState() {
     super.initState();
-    _controller = widget.controller ??
-        PageController(initialPage: widget.initialPage);
+    _controller =
+        widget.controller ?? PageController(initialPage: widget.initialPage);
     _pageIndex = widget.initialPage;
   }
 
@@ -85,8 +89,6 @@ class PageFlipViewState extends State<PageFlipView> {
   void _ensurePages(Size size) {
     if (_lastSize == size && _pages.isNotEmpty) return;
     _lastSize = size;
-    // Reserve space for title on first conceptual page — include title in layout
-    // by reducing height slightly for all pages for consistency.
     final pageSize = Size(size.width - 44, size.height - 56);
     final bodyPages = PagePaginator.paginate(
       text: widget.text,
@@ -106,6 +108,7 @@ class PageFlipViewState extends State<PageFlipView> {
         _ensurePages(Size(constraints.maxWidth, constraints.maxHeight));
         return NotificationListener<ScrollNotification>(
           onNotification: (notification) {
+            if (!widget.allowGestureChapterChange) return false;
             if (notification is OverscrollNotification) {
               if (notification.overscroll < -8 && _pageIndex == 0) {
                 widget.onPrevChapter();
@@ -132,8 +135,10 @@ class PageFlipViewState extends State<PageFlipView> {
                         duration: const Duration(milliseconds: 240),
                         curve: Curves.easeOut,
                       );
-                    } else {
+                    } else if (widget.allowGestureChapterChange) {
                       widget.onPrevChapter();
+                    } else {
+                      widget.onTapCenter();
                     }
                   } else if (x > w * 0.72) {
                     if (index < _pages.length - 1) {
@@ -141,8 +146,10 @@ class PageFlipViewState extends State<PageFlipView> {
                         duration: const Duration(milliseconds: 240),
                         curve: Curves.easeOut,
                       );
-                    } else {
+                    } else if (widget.allowGestureChapterChange) {
                       widget.onNextChapter();
+                    } else {
+                      widget.onTapCenter();
                     }
                   } else {
                     widget.onTapCenter();

@@ -2,13 +2,19 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../data/source_models.dart';
 import '../../providers/library_providers.dart';
 import '../../widgets/empty_state.dart';
 import '../reader/reader_page.dart';
+
+enum _SearchMatchMode { fuzzy, exact }
 
 class SourcesPage extends ConsumerStatefulWidget {
   const SourcesPage({super.key});
@@ -23,8 +29,10 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
   final _keywordCtrl = TextEditingController();
   bool _searching = false;
   bool _importing = false;
+  bool _exporting = false;
   List<SearchBookHit> _hits = const [];
   String? _searchError;
+  _SearchMatchMode _matchMode = _SearchMatchMode.fuzzy;
 
   @override
   void initState() {
@@ -109,6 +117,58 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
     }
   }
 
+  Future<void> _exportSources({required bool copyOnly}) async {
+    setState(() => _exporting = true);
+    try {
+      final json = await ref.read(sourcesProvider.notifier).exportJson();
+      if (copyOnly) {
+        await Clipboard.setData(ClipboardData(text: json));
+        if (!mounted) return;
+        _toast('已复制书源 JSON，可粘贴保存');
+        return;
+      }
+
+      final dir = await getApplicationDocumentsDirectory();
+      final stamp = DateTime.now()
+          .toIso8601String()
+          .replaceAll(':', '-')
+          .split('.')
+          .first;
+      final file = File(p.join(dir.path, 'inkshelf_sources_$stamp.json'));
+      await file.writeAsString(json, flush: true);
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(file.path, mimeType: 'application/json')],
+          subject: 'InkShelf 书源导出',
+          text: '墨架书源备份，可在新安装后「从文件导入」或粘贴 JSON。',
+        ),
+      );
+      if (!mounted) return;
+      _toast('已导出 ${ref.read(sourcesProvider).value?.length ?? 0} 个书源');
+    } catch (error) {
+      if (!mounted) return;
+      _toast('导出失败：$error');
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
+  }
+
+  List<SearchBookHit> _filterHits(List<SearchBookHit> raw, String keyword) {
+    final key = keyword.trim().toLowerCase();
+    final keyCompact = key.replaceAll(RegExp(r'\s+'), '');
+    return raw.where((hit) {
+      final name = hit.name.trim().toLowerCase();
+      final nameCompact = name.replaceAll(RegExp(r'\s+'), '');
+      final author = (hit.author ?? '').trim().toLowerCase();
+      if (_matchMode == _SearchMatchMode.exact) {
+        return nameCompact == keyCompact;
+      }
+      return name.contains(key) ||
+          nameCompact.contains(keyCompact) ||
+          author.contains(key);
+    }).toList();
+  }
+
   Future<void> _search() async {
     final keyword = _keywordCtrl.text.trim();
     if (keyword.isEmpty) {
@@ -141,16 +201,24 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
       }
     }
 
+    final filtered = _filterHits(hits, keyword);
+
     if (!mounted) return;
     setState(() {
       _searching = false;
-      _hits = hits;
-      if (hits.isEmpty && errors.isNotEmpty) {
+      _hits = filtered;
+      if (filtered.isEmpty && errors.isNotEmpty) {
         _searchError = errors.take(2).join('\n');
+      } else if (filtered.isEmpty && hits.isNotEmpty) {
+        _searchError = _matchMode == _SearchMatchMode.exact
+            ? '有结果但无精准匹配，可切换「模糊」再试'
+            : null;
       }
     });
-    if (hits.isEmpty && errors.isEmpty) {
+    if (filtered.isEmpty && errors.isEmpty && hits.isEmpty) {
       _toast('没有搜到结果');
+    } else if (filtered.isEmpty && hits.isNotEmpty) {
+      _toast('无匹配结果（已按${_matchMode == _SearchMatchMode.exact ? '精准' : '模糊'}过滤）');
     }
   }
 
@@ -195,12 +263,13 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
     final sourcesAsync = ref.watch(sourcesProvider);
+    final sourceCount = sourcesAsync.value?.length ?? 0;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('书源'),
         actions: [
-          if (_importing)
+          if (_importing || _exporting)
             const Padding(
               padding: EdgeInsets.only(right: 16),
               child: Center(
@@ -212,15 +281,37 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
               ),
             )
           else ...[
+            if (sourceCount > 0)
+              PopupMenuButton<String>(
+                tooltip: '导出',
+                icon: const Icon(Icons.ios_share),
+                onSelected: (value) {
+                  if (value == 'share') {
+                    _exportSources(copyOnly: false);
+                  } else if (value == 'copy') {
+                    _exportSources(copyOnly: true);
+                  }
+                },
+                itemBuilder: (context) => const [
+                  PopupMenuItem(
+                    value: 'share',
+                    child: Text('导出并分享 JSON'),
+                  ),
+                  PopupMenuItem(
+                    value: 'copy',
+                    child: Text('复制 JSON 到剪贴板'),
+                  ),
+                ],
+              ),
             IconButton(
               tooltip: '从文件导入',
               onPressed: _importFromFile,
-              icon: Icon(Icons.upload_file),
+              icon: const Icon(Icons.upload_file),
             ),
             IconButton(
               tooltip: '粘贴 JSON',
               onPressed: _importFromPaste,
-              icon: Icon(Icons.add),
+              icon: const Icon(Icons.add),
             ),
           ],
           const SizedBox(width: 4),
@@ -247,65 +338,92 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
                 return EmptyState(
                   icon: Icons.travel_explore_outlined,
                   title: '还没有书源',
-                  body: '粘贴或导入书源 JSON 后即可搜索。不预置任何书源。',
+                  body: '粘贴或导入书源 JSON 后即可搜索。重装前请先导出备份。',
                   actionLabel: '粘贴 JSON',
                   onAction: _importFromPaste,
                 );
               }
-              return ListView.separated(
-                itemCount: sources.length,
-                separatorBuilder: (_, __) => Divider(
-                  height: 1,
-                  color: colors.outline.withValues(alpha: 0.7),
-                ),
-                itemBuilder: (context, index) {
-                  final source = sources[index];
-                  return SwitchListTile(
-                    value: source.enabled,
-                    onChanged: (v) {
-                      ref
-                          .read(sourcesProvider.notifier)
-                          .setEnabled(source.id, v);
-                    },
-                    title: Text(
-                      source.bookSourceName,
-                      style: GoogleFonts.notoSansSc(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 16,
-                      ),
+              return Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            '共 ${sources.length} 个书源 · 已启用 ${sources.where((s) => s.enabled).length} 个',
+                            style: GoogleFonts.notoSansSc(
+                              fontSize: 12,
+                              color: colors.onSurface.withValues(alpha: 0.55),
+                            ),
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: () => _exportSources(copyOnly: false),
+                          icon: const Icon(Icons.ios_share, size: 18),
+                          label: const Text('导出'),
+                        ),
+                      ],
                     ),
-                    subtitle: Text(
-                      source.bookSourceUrl,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: GoogleFonts.notoSansSc(
-                        fontSize: 12,
-                        color: colors.onSurface.withValues(alpha: 0.55),
+                  ),
+                  Expanded(
+                    child: ListView.separated(
+                      itemCount: sources.length,
+                      separatorBuilder: (_, __) => Divider(
+                        height: 1,
+                        color: colors.outline.withValues(alpha: 0.7),
                       ),
-                    ),
-                    secondary: IconButton(
-                      tooltip: '删除',
-                      onPressed: () async {
-                        await ref
-                            .read(sourcesProvider.notifier)
-                            .deleteSource(source.id);
-                        _toast('已删除书源');
+                      itemBuilder: (context, index) {
+                        final source = sources[index];
+                        return SwitchListTile(
+                          value: source.enabled,
+                          onChanged: (v) {
+                            ref
+                                .read(sourcesProvider.notifier)
+                                .setEnabled(source.id, v);
+                          },
+                          title: Text(
+                            source.bookSourceName,
+                            style: GoogleFonts.notoSansSc(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 16,
+                            ),
+                          ),
+                          subtitle: Text(
+                            source.bookSourceUrl,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.notoSansSc(
+                              fontSize: 12,
+                              color: colors.onSurface.withValues(alpha: 0.55),
+                            ),
+                          ),
+                          secondary: IconButton(
+                            tooltip: '删除',
+                            onPressed: () async {
+                              await ref
+                                  .read(sourcesProvider.notifier)
+                                  .deleteSource(source.id);
+                              _toast('已删除书源');
+                            },
+                            icon: Icon(
+                              Icons.delete_outline,
+                              size: 18,
+                              color: colors.onSurface.withValues(alpha: 0.35),
+                            ),
+                          ),
+                        );
                       },
-                      icon: Icon(
-                        Icons.delete_outline,
-                        size: 18,
-                        color: colors.onSurface.withValues(alpha: 0.35),
-                      ),
                     ),
-                  );
-                },
+                  ),
+                ],
               );
             },
           ),
           Column(
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
                 child: Row(
                   children: [
                     Expanded(
@@ -316,7 +434,7 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
                         decoration: InputDecoration(
                           hintText: '搜索书名',
                           hintStyle: GoogleFonts.notoSansSc(fontSize: 14),
-                          prefixIcon: Icon(Icons.search),
+                          prefixIcon: const Icon(Icons.search),
                           filled: true,
                           fillColor: colors.surface,
                           border: OutlineInputBorder(
@@ -354,6 +472,42 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
                   ],
                 ),
               ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Row(
+                  children: [
+                    Text(
+                      '匹配',
+                      style: GoogleFonts.notoSansSc(
+                        fontSize: 12,
+                        color: colors.onSurface.withValues(alpha: 0.55),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ChoiceChip(
+                      label: const Text('模糊'),
+                      selected: _matchMode == _SearchMatchMode.fuzzy,
+                      onSelected: (_) =>
+                          setState(() => _matchMode = _SearchMatchMode.fuzzy),
+                    ),
+                    const SizedBox(width: 6),
+                    ChoiceChip(
+                      label: const Text('精准'),
+                      selected: _matchMode == _SearchMatchMode.exact,
+                      onSelected: (_) =>
+                          setState(() => _matchMode = _SearchMatchMode.exact),
+                    ),
+                    const Spacer(),
+                    Text(
+                      '已启用书源全部参与',
+                      style: GoogleFonts.notoSansSc(
+                        fontSize: 11,
+                        color: colors.onSurface.withValues(alpha: 0.4),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               if (_searchError != null)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -370,7 +524,7 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
                     ? EmptyState(
                         icon: Icons.search,
                         title: '搜索网络书籍',
-                        body: '使用已启用的书源搜索，再加入本地书架阅读。',
+                        body: '使用已启用的多个书源搜索；结果会标注来源书源。',
                       )
                     : ListView.separated(
                         itemCount: _hits.length,
@@ -385,7 +539,7 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
                           return ListTile(
                             contentPadding: const EdgeInsets.symmetric(
                               horizontal: 20,
-                              vertical: 6,
+                              vertical: 8,
                             ),
                             title: Text(
                               hit.name,
@@ -394,15 +548,44 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
                                 fontSize: 16,
                               ),
                             ),
-                            subtitle: Text(
-                              [
-                                if (hit.author != null && hit.author!.isNotEmpty)
-                                  hit.author!,
-                                hit.sourceName,
-                              ].join(' · '),
-                              style: GoogleFonts.notoSansSc(
-                                fontSize: 12,
-                                color: colors.onSurface.withValues(alpha: 0.55),
+                            subtitle: Padding(
+                              padding: const EdgeInsets.only(top: 6),
+                              child: Wrap(
+                                spacing: 8,
+                                runSpacing: 6,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: [
+                                  Chip(
+                                    visualDensity: VisualDensity.compact,
+                                    materialTapTargetSize:
+                                        MaterialTapTargetSize.shrinkWrap,
+                                    padding: EdgeInsets.zero,
+                                    labelPadding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                    ),
+                                    backgroundColor:
+                                        colors.primary.withValues(alpha: 0.12),
+                                    side: BorderSide.none,
+                                    label: Text(
+                                      '书源 · ${hit.sourceName}',
+                                      style: GoogleFonts.notoSansSc(
+                                        fontSize: 11,
+                                        color: colors.primary,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ),
+                                  if (hit.author != null &&
+                                      hit.author!.isNotEmpty)
+                                    Text(
+                                      hit.author!,
+                                      style: GoogleFonts.notoSansSc(
+                                        fontSize: 12,
+                                        color: colors.onSurface
+                                            .withValues(alpha: 0.55),
+                                      ),
+                                    ),
+                                ],
                               ),
                             ),
                             trailing: TextButton(

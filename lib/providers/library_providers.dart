@@ -162,6 +162,8 @@ class SourcesNotifier extends AsyncNotifier<List<BookSource>> {
     state = AsyncData(await _repo.importJsonText(text));
   }
 
+  Future<String> exportJson() => _repo.exportJsonText();
+
   Future<void> setEnabled(String id, bool enabled) async {
     state = AsyncData(await _repo.setEnabled(id, enabled));
   }
