@@ -35,18 +35,21 @@ class _ShelfPageState extends ConsumerState<ShelfPage> {
       final result = await FilePicker.pickFiles(
         type: FileType.custom,
         allowedExtensions: const ['txt'],
-        withData: false,
+        withData: true,
       );
       if (result == null || result.files.isEmpty) return;
       final file = result.files.single;
+      final bytes = file.bytes;
       final path = file.path;
-      if (path == null) {
-        _toast('无法读取所选文件路径');
+
+      if (bytes == null && path == null) {
+        _toast('无法读取所选文件');
         return;
       }
 
       final book = await ref.read(booksProvider.notifier).importTxt(
             sourcePath: path,
+            bytes: bytes,
             displayName: file.name,
           );
       if (!mounted) return;

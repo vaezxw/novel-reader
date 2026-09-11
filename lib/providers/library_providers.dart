@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'dart:typed_data';
 
 import '../data/library_repository.dart';
 import '../data/models.dart';
@@ -31,11 +32,13 @@ class BooksNotifier extends AsyncNotifier<List<Book>> {
   Future<List<Book>> build() => _repo.loadBooks();
 
   Future<Book> importTxt({
-    required String sourcePath,
+    String? sourcePath,
+    List<int>? bytes,
     required String displayName,
   }) async {
     final book = await _repo.importTxtFile(
       sourcePath: sourcePath,
+      bytes: bytes == null ? null : Uint8List.fromList(bytes),
       displayName: displayName,
     );
     state = AsyncData(await _repo.loadBooks());

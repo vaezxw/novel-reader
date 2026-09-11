@@ -1,12 +1,13 @@
 import 'dart:convert';
-import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 
 import 'chapter_splitter.dart';
+import 'library_fs_stub.dart' if (dart.library.io) 'library_fs_io.dart' as fs;
 import 'models.dart';
 import 'source_engine.dart';
 import 'source_models.dart';
@@ -26,22 +27,49 @@ class LibraryRepository {
   final SourceEngine _sourceEngine;
   final SourceRepository _sourceRepository;
 
-  Future<Directory> _booksRoot() async {
-    final docs = await getApplicationDocumentsDirectory();
-    final dir = Directory(p.join(docs.path, 'inkshelf', 'books'));
-    if (!await dir.exists()) {
-      await dir.create(recursive: true);
-    }
+  String _contentKey(String bookId) => 'inkshelf.content.$bookId';
+  String _chaptersKey(String bookId) => 'inkshelf.chapters.$bookId';
+  String _metaKey(String bookId) => 'inkshelf.meta.$bookId';
+  String _cacheKey(String bookId, int index) =>
+      'inkshelf.cache.$bookId.$index';
+
+  Future<String> _bookDirPath(String id) async {
+    final root = await fs.fsBooksRootPath();
+    final dir = p.join(root, id);
+    await fs.fsEnsureDir(dir);
     return dir;
   }
 
-  Future<Directory> _bookDir(String id) async {
-    final root = await _booksRoot();
-    final dir = Directory(p.join(root.path, id));
-    if (!await dir.exists()) {
-      await dir.create(recursive: true);
+  Future<void> _writeChapters(String bookId, List<ChapterRef> chapters) async {
+    final raw = jsonEncode(chapters.map((c) => c.toJson()).toList());
+    if (kIsWeb) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_chaptersKey(bookId), raw);
+      return;
     }
-    return dir;
+    final dir = await _bookDirPath(bookId);
+    await fs.fsWriteString(p.join(dir, 'chapters.json'), raw);
+  }
+
+  Future<void> _writeContent(String bookId, String text) async {
+    if (kIsWeb) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_contentKey(bookId), text);
+      return;
+    }
+    final dir = await _bookDirPath(bookId);
+    await fs.fsWriteString(p.join(dir, 'content.txt'), text);
+  }
+
+  Future<void> _writeMeta(String bookId, Map<String, dynamic> meta) async {
+    final raw = jsonEncode(meta);
+    if (kIsWeb) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_metaKey(bookId), raw);
+      return;
+    }
+    final dir = await _bookDirPath(bookId);
+    await fs.fsWriteString(p.join(dir, 'meta.json'), raw);
   }
 
   Future<List<Book>> loadBooks() async {
@@ -162,28 +190,48 @@ class LibraryRepository {
   }
 
   Future<List<ChapterRef>> loadChapters(String bookId) async {
-    final dir = await _bookDir(bookId);
-    final file = File(p.join(dir.path, 'chapters.json'));
-    if (!await file.exists()) return [];
-    final list = jsonDecode(await file.readAsString()) as List<dynamic>;
+    if (kIsWeb) {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_chaptersKey(bookId));
+      if (raw == null || raw.isEmpty) return [];
+      final list = jsonDecode(raw) as List<dynamic>;
+      return list
+          .map((e) => ChapterRef.fromJson(e as Map<String, dynamic>))
+          .toList();
+    }
+    final dir = await _bookDirPath(bookId);
+    final raw = await fs.fsReadString(p.join(dir, 'chapters.json'));
+    if (raw == null || raw.isEmpty) return [];
+    final list = jsonDecode(raw) as List<dynamic>;
     return list
         .map((e) => ChapterRef.fromJson(e as Map<String, dynamic>))
         .toList();
   }
 
   Future<Map<String, dynamic>?> loadBookMeta(String bookId) async {
-    final dir = await _bookDir(bookId);
-    final file = File(p.join(dir.path, 'meta.json'));
-    if (!await file.exists()) return null;
-    return jsonDecode(await file.readAsString()) as Map<String, dynamic>;
+    if (kIsWeb) {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_metaKey(bookId));
+      if (raw == null || raw.isEmpty) return null;
+      return jsonDecode(raw) as Map<String, dynamic>;
+    }
+    final dir = await _bookDirPath(bookId);
+    final raw = await fs.fsReadString(p.join(dir, 'meta.json'));
+    if (raw == null) return null;
+    return jsonDecode(raw) as Map<String, dynamic>;
   }
 
   Future<String> loadChapterText(String bookId, ChapterRef chapter) async {
-    final dir = await _bookDir(bookId);
     if (chapter.isRemote) {
-      final cache = File(p.join(dir.path, 'cache', '${chapter.index}.txt'));
-      if (await cache.exists()) {
-        return (await cache.readAsString()).trim();
+      if (kIsWeb) {
+        final prefs = await SharedPreferences.getInstance();
+        final cached = prefs.getString(_cacheKey(bookId, chapter.index));
+        if (cached != null && cached.isNotEmpty) return cached.trim();
+      } else {
+        final dir = await _bookDirPath(bookId);
+        final cached =
+            await fs.fsReadString(p.join(dir, 'cache', '${chapter.index}.txt'));
+        if (cached != null && cached.isNotEmpty) return cached.trim();
       }
 
       final book = await getBook(bookId);
@@ -206,30 +254,54 @@ class LibraryRepository {
         source: source,
         chapterUrl: chapter.url!,
       );
-      await cache.parent.create(recursive: true);
-      await cache.writeAsString(text, flush: true);
+      if (kIsWeb) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_cacheKey(bookId, chapter.index), text);
+      } else {
+        final dir = await _bookDirPath(bookId);
+        await fs.fsWriteString(
+          p.join(dir, 'cache', '${chapter.index}.txt'),
+          text,
+        );
+      }
       return text;
     }
 
-    final file = File(p.join(dir.path, 'content.txt'));
-    final text = await file.readAsString();
-    final start = chapter.start.clamp(0, text.length);
-    final end = chapter.end.clamp(start, text.length);
-    return text.substring(start, end).trim();
+    String? full;
+    if (kIsWeb) {
+      final prefs = await SharedPreferences.getInstance();
+      full = prefs.getString(_contentKey(bookId));
+    } else {
+      final dir = await _bookDirPath(bookId);
+      full = await fs.fsReadString(p.join(dir, 'content.txt'));
+    }
+    if (full == null) throw StateError('找不到书籍正文');
+    final start = chapter.start.clamp(0, full.length);
+    final end = chapter.end.clamp(start, full.length);
+    return full.substring(start, end).trim();
   }
 
   Future<Book> importTxtFile({
-    required String sourcePath,
+    String? sourcePath,
+    Uint8List? bytes,
     required String displayName,
   }) async {
-    final bytes = await File(sourcePath).readAsBytes();
-    final text = await TextDecoder.decodeBytes(bytes);
+    late final Uint8List data;
+    if (bytes != null) {
+      data = bytes;
+    } else if (sourcePath != null && !kIsWeb) {
+      final read = await fs.fsReadBytes(sourcePath);
+      if (read == null) throw StateError('无法读取文件');
+      data = read;
+    } else {
+      throw StateError('浏览器请选择本地文件（需读取文件内容）');
+    }
+
+    final text = await TextDecoder.decodeBytes(data);
     final splits = ChapterSplitter.split(text);
 
     final id = _uuid.v4();
-    final dir = await _bookDir(id);
-    final contentFile = File(p.join(dir.path, 'content.txt'));
-    await contentFile.writeAsString(text, flush: true);
+    await _writeContent(id, text);
 
     final chapters = <ChapterRef>[
       for (var i = 0; i < splits.length; i++)
@@ -240,10 +312,7 @@ class LibraryRepository {
           end: splits[i].end,
         ),
     ];
-    await File(p.join(dir.path, 'chapters.json')).writeAsString(
-      jsonEncode(chapters.map((c) => c.toJson()).toList()),
-      flush: true,
-    );
+    await _writeChapters(id, chapters);
 
     final title =
         displayName.replaceAll(RegExp(r'\.txt$', caseSensitive: false), '');
@@ -275,7 +344,6 @@ class LibraryRepository {
     }
 
     final id = _uuid.v4();
-    final dir = await _bookDir(id);
     final chapters = <ChapterRef>[
       for (var i = 0; i < chaptersRemote.length; i++)
         ChapterRef(
@@ -284,20 +352,14 @@ class LibraryRepository {
           url: chaptersRemote[i].url,
         ),
     ];
-    await File(p.join(dir.path, 'chapters.json')).writeAsString(
-      jsonEncode(chapters.map((c) => c.toJson()).toList()),
-      flush: true,
-    );
-    await File(p.join(dir.path, 'meta.json')).writeAsString(
-      jsonEncode({
-        'sourceId': source.id,
-        'sourceName': source.bookSourceName,
-        'bookUrl': hit.bookUrl,
-        'coverUrl': hit.coverUrl,
-        'intro': hit.intro,
-      }),
-      flush: true,
-    );
+    await _writeChapters(id, chapters);
+    await _writeMeta(id, {
+      'sourceId': source.id,
+      'sourceName': source.bookSourceName,
+      'bookUrl': hit.bookUrl,
+      'coverUrl': hit.coverUrl,
+      'intro': hit.intro,
+    });
 
     final book = Book(
       id: id,
@@ -347,11 +409,7 @@ class LibraryRepository {
       throw StateError('未解析到目录章节');
     }
 
-    final dir = await _bookDir(bookId);
     final oldChapters = await loadChapters(bookId);
-    final oldByIndex = {
-      for (final c in oldChapters) c.index: c.url,
-    };
 
     final chapters = <ChapterRef>[
       for (var i = 0; i < chaptersRemote.length; i++)
@@ -361,22 +419,19 @@ class LibraryRepository {
           url: chaptersRemote[i].url,
         ),
     ];
-    await File(p.join(dir.path, 'chapters.json')).writeAsString(
-      jsonEncode(chapters.map((c) => c.toJson()).toList()),
-      flush: true,
-    );
+    await _writeChapters(bookId, chapters);
 
-    final cacheDir = Directory(p.join(dir.path, 'cache'));
-    if (await cacheDir.exists()) {
-      await for (final entity in cacheDir.list()) {
-        if (entity is! File) continue;
-        final name = p.basenameWithoutExtension(entity.path);
-        final idx = int.tryParse(name);
-        if (idx == null) continue;
-        final newUrl = idx < chapters.length ? chapters[idx].url : null;
-        final oldUrl = oldByIndex[idx];
-        if (newUrl != oldUrl) {
-          await entity.delete();
+    final prefs = await SharedPreferences.getInstance();
+    for (final old in oldChapters) {
+      final newUrl =
+          old.index < chapters.length ? chapters[old.index].url : null;
+      if (newUrl != old.url) {
+        if (kIsWeb) {
+          await prefs.remove(_cacheKey(bookId, old.index));
+        } else {
+          final dir = await _bookDirPath(bookId);
+          await fs.fsDeleteRecursive(p.join(dir, 'cache'));
+          break;
         }
       }
     }
@@ -417,10 +472,16 @@ class LibraryRepository {
     await _saveBooks(books);
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_bookmarksKey(bookId));
-    final root = await _booksRoot();
-    final dir = Directory(p.join(root.path, bookId));
-    if (await dir.exists()) {
-      await dir.delete(recursive: true);
+    await prefs.remove(_contentKey(bookId));
+    await prefs.remove(_chaptersKey(bookId));
+    await prefs.remove(_metaKey(bookId));
+    final keys = prefs.getKeys().where((k) => k.startsWith('inkshelf.cache.$bookId.'));
+    for (final key in keys) {
+      await prefs.remove(key);
+    }
+    if (!kIsWeb) {
+      final root = await fs.fsBooksRootPath();
+      await fs.fsDeleteRecursive(p.join(root, bookId));
     }
   }
 }
