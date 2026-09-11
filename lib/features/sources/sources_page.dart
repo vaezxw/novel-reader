@@ -139,7 +139,10 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
     }
   }
 
-  Future<void> _exportSources({required bool copyOnly}) async {
+  Future<void> _exportSources({
+    required bool copyOnly,
+    Rect? shareOrigin,
+  }) async {
     setState(() => _exporting = true);
     try {
       final json = await ref.read(sourcesProvider.notifier).exportJson();
@@ -150,10 +153,12 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
         return;
       }
 
+      final origin = _shareOriginOrFallback(shareOrigin);
       await SharePlus.instance.share(
         ShareParams(
           text: json,
           subject: 'InkShelf 书源导出',
+          sharePositionOrigin: origin,
         ),
       );
       if (!mounted) return;
@@ -163,6 +168,59 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
       _toast('导出失败：$error');
     } finally {
       if (mounted) setState(() => _exporting = false);
+    }
+  }
+
+  Rect _shareOriginOrFallback(Rect? origin) {
+    if (origin != null && origin.width > 0 && origin.height > 0) {
+      return origin;
+    }
+    final size = MediaQuery.sizeOf(context);
+    // iPad/iOS require a non-zero origin inside the view bounds.
+    return Rect.fromCenter(
+      center: Offset(size.width / 2, size.height / 2),
+      width: 2,
+      height: 2,
+    );
+  }
+
+  Rect? _originFromContext(BuildContext buttonContext) {
+    final box = buttonContext.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return null;
+    return box.localToGlobal(Offset.zero) & box.size;
+  }
+
+  Future<void> _clearAllSources() async {
+    final sources = ref.read(sourcesProvider).value ?? [];
+    if (sources.isEmpty) {
+      _toast('没有可清空的书源');
+      return;
+    }
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('清空全部书源'),
+        content: Text('确定清空全部 ${sources.length} 个书源？此操作不可恢复。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('清空'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await ref.read(sourcesProvider.notifier).clearAll();
+      if (!mounted) return;
+      _toast('已清空全部书源');
+    } catch (error) {
+      if (!mounted) return;
+      _toast('清空失败：$error');
     }
   }
 
@@ -357,8 +415,12 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
                 tooltip: '导出',
                 icon: const Icon(Icons.ios_share),
                 onSelected: (value) {
+                  final box = context.findRenderObject() as RenderBox?;
+                  final origin = (box != null && box.hasSize)
+                      ? (box.localToGlobal(Offset.zero) & box.size)
+                      : null;
                   if (value == 'share') {
-                    _exportSources(copyOnly: false);
+                    _exportSources(copyOnly: false, shareOrigin: origin);
                   } else if (value == 'copy') {
                     _exportSources(copyOnly: true);
                   }
@@ -374,15 +436,32 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
                   ),
                 ],
               ),
-            IconButton(
-              tooltip: '从文件导入',
-              onPressed: _importFromFile,
-              icon: const Icon(Icons.upload_file),
-            ),
-            IconButton(
-              tooltip: '粘贴 JSON',
-              onPressed: _importFromPaste,
+            if (sourceCount > 0)
+              IconButton(
+                tooltip: '清空全部书源',
+                onPressed: _clearAllSources,
+                icon: const Icon(Icons.delete_sweep_outlined),
+              ),
+            PopupMenuButton<String>(
+              tooltip: '添加书源',
               icon: const Icon(Icons.add),
+              onSelected: (value) {
+                if (value == 'paste') {
+                  _importFromPaste();
+                } else if (value == 'file') {
+                  _importFromFile();
+                }
+              },
+              itemBuilder: (context) => const [
+                PopupMenuItem(
+                  value: 'paste',
+                  child: Text('粘贴 JSON / 链接'),
+                ),
+                PopupMenuItem(
+                  value: 'file',
+                  child: Text('从文件导入书源'),
+                ),
+              ],
             ),
           ],
           const SizedBox(width: 4),
@@ -430,9 +509,21 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
                           ),
                         ),
                         TextButton.icon(
-                          onPressed: () => _exportSources(copyOnly: false),
-                          icon: const Icon(Icons.ios_share, size: 18),
-                          label: const Text('导出'),
+                          onPressed: _clearAllSources,
+                          icon: const Icon(Icons.delete_sweep_outlined, size: 18),
+                          label: const Text('清空'),
+                        ),
+                        Builder(
+                          builder: (buttonContext) {
+                            return TextButton.icon(
+                              onPressed: () => _exportSources(
+                                copyOnly: false,
+                                shareOrigin: _originFromContext(buttonContext),
+                              ),
+                              icon: const Icon(Icons.ios_share, size: 18),
+                              label: const Text('导出'),
+                            );
+                          },
                         ),
                       ],
                     ),

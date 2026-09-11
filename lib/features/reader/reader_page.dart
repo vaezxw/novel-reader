@@ -625,13 +625,21 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         onTapCenter: _toggleChrome,
         onPrevChapter: () => _goChapter(_chapterIndex - 1),
         onNextChapter: () => _goChapter(_chapterIndex + 1),
-        allowGestureChapterChange: false,
+        allowGestureChapterChange: true,
       );
     }
 
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTapUp: (_) => _toggleChrome(),
+      onHorizontalDragEnd: (details) {
+        final v = details.primaryVelocity ?? 0;
+        if (v <= -420) {
+          _goChapter(_chapterIndex + 1);
+        } else if (v >= 420) {
+          _goChapter(_chapterIndex - 1);
+        }
+      },
       child: _VerticalChapterContent(
         scrollController: _scrollController,
         title: chapterTitle,
@@ -994,8 +1002,8 @@ class _ReaderPrefsSheet extends ConsumerWidget {
                 for (final mode in ReadMode.values)
                   ChoiceChip(
                     label: Text(switch (mode) {
-                      ReadMode.pageFlip => '左右翻页',
-                      ReadMode.verticalScroll => '上下滚动',
+                      ReadMode.pageFlip => '左右翻页（滑到边切章）',
+                      ReadMode.verticalScroll => '上下滚动（左右滑切章）',
                     }),
                     selected: prefs.readMode == mode,
                     onSelected: (_) {

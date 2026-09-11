@@ -178,4 +178,8 @@ class SourcesNotifier extends AsyncNotifier<List<BookSource>> {
   Future<void> deleteSource(String id) async {
     state = AsyncData(await _repo.deleteSource(id));
   }
+
+  Future<void> clearAll() async {
+    state = AsyncData(await _repo.clearAll());
+  }
 }

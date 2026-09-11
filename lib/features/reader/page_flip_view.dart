@@ -26,7 +26,7 @@ class PageFlipView extends StatefulWidget {
   final VoidCallback onTapCenter;
   final VoidCallback onPrevChapter;
   final VoidCallback onNextChapter;
-  /// When false, edge swipe/tap only flips pages; chapter change is button-only.
+  /// When true, swiping/tapping past the first/last page changes chapter.
   /// Auto-read still uses [onNextChapter] via [nextPageOrChapter].
   final bool allowGestureChapterChange;
   final PageController? controller;
@@ -41,6 +41,7 @@ class PageFlipViewState extends State<PageFlipView> {
   List<String> _pages = const [''];
   int _pageIndex = 0;
   Size? _lastSize;
+  DateTime? _lastChapterGestureAt;
 
   int get pageIndex => _pageIndex;
   int get pageCount => _pages.length;
@@ -55,6 +56,28 @@ class PageFlipViewState extends State<PageFlipView> {
     }
     widget.onNextChapter();
     return false;
+  }
+
+  void _gesturePrevChapter() {
+    if (!_allowChapterGesture()) return;
+    widget.onPrevChapter();
+  }
+
+  void _gestureNextChapter() {
+    if (!_allowChapterGesture()) return;
+    widget.onNextChapter();
+  }
+
+  bool _allowChapterGesture() {
+    if (!widget.allowGestureChapterChange) return false;
+    final now = DateTime.now();
+    if (_lastChapterGestureAt != null &&
+        now.difference(_lastChapterGestureAt!) <
+            const Duration(milliseconds: 700)) {
+      return false;
+    }
+    _lastChapterGestureAt = now;
+    return true;
   }
 
   @override
@@ -110,17 +133,21 @@ class PageFlipViewState extends State<PageFlipView> {
           onNotification: (notification) {
             if (!widget.allowGestureChapterChange) return false;
             if (notification is OverscrollNotification) {
-              if (notification.overscroll < -8 && _pageIndex == 0) {
-                widget.onPrevChapter();
-              } else if (notification.overscroll > 8 &&
+              if (notification.overscroll < -12 && _pageIndex == 0) {
+                _gesturePrevChapter();
+              } else if (notification.overscroll > 12 &&
                   _pageIndex >= _pages.length - 1) {
-                widget.onNextChapter();
+                _gestureNextChapter();
               }
             }
             return false;
           },
           child: PageView.builder(
             controller: _controller,
+            // Bouncing makes edge overscroll fire reliably for chapter change.
+            physics: const BouncingScrollPhysics(
+              parent: AlwaysScrollableScrollPhysics(),
+            ),
             itemCount: _pages.length,
             onPageChanged: (i) => setState(() => _pageIndex = i),
             itemBuilder: (context, index) {
@@ -136,7 +163,7 @@ class PageFlipViewState extends State<PageFlipView> {
                         curve: Curves.easeOut,
                       );
                     } else if (widget.allowGestureChapterChange) {
-                      widget.onPrevChapter();
+                      _gesturePrevChapter();
                     } else {
                       widget.onTapCenter();
                     }
@@ -147,7 +174,7 @@ class PageFlipViewState extends State<PageFlipView> {
                         curve: Curves.easeOut,
                       );
                     } else if (widget.allowGestureChapterChange) {
-                      widget.onNextChapter();
+                      _gestureNextChapter();
                     } else {
                       widget.onTapCenter();
                     }

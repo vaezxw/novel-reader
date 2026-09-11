@@ -231,4 +231,9 @@ class SourceRepository {
     await _save(sources);
     return sources;
   }
+
+  Future<List<BookSource>> clearAll() async {
+    await _save(const []);
+    return const [];
+  }
 }

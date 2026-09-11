@@ -108,8 +108,8 @@ class SettingsPage extends ConsumerWidget {
               for (final mode in ReadMode.values)
                 ListTile(
                   title: Text(switch (mode) {
-                    ReadMode.pageFlip => '左右翻页（默认）',
-                    ReadMode.verticalScroll => '上下滚动',
+                    ReadMode.pageFlip => '左右翻页（默认，滑到边切章）',
+                    ReadMode.verticalScroll => '上下滚动（左右滑切章）',
                   }),
                   trailing: mode == current ? const Icon(Icons.check) : null,
                   onTap: () => Navigator.pop(context, mode),
