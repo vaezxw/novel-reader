@@ -13,6 +13,7 @@ import 'source_engine.dart';
 import 'source_models.dart';
 import 'source_repository.dart';
 import 'text_decoder.dart';
+import 'web_book_store.dart';
 
 class LibraryRepository {
   LibraryRepository({
@@ -43,8 +44,7 @@ class LibraryRepository {
   Future<void> _writeChapters(String bookId, List<ChapterRef> chapters) async {
     final raw = jsonEncode(chapters.map((c) => c.toJson()).toList());
     if (kIsWeb) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_chaptersKey(bookId), raw);
+      await WebBookStore.put(_chaptersKey(bookId), raw);
       return;
     }
     final dir = await _bookDirPath(bookId);
@@ -53,8 +53,7 @@ class LibraryRepository {
 
   Future<void> _writeContent(String bookId, String text) async {
     if (kIsWeb) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_contentKey(bookId), text);
+      await WebBookStore.put(_contentKey(bookId), text);
       return;
     }
     final dir = await _bookDirPath(bookId);
@@ -64,8 +63,7 @@ class LibraryRepository {
   Future<void> _writeMeta(String bookId, Map<String, dynamic> meta) async {
     final raw = jsonEncode(meta);
     if (kIsWeb) {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_metaKey(bookId), raw);
+      await WebBookStore.put(_metaKey(bookId), raw);
       return;
     }
     final dir = await _bookDirPath(bookId);
@@ -191,8 +189,7 @@ class LibraryRepository {
 
   Future<List<ChapterRef>> loadChapters(String bookId) async {
     if (kIsWeb) {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_chaptersKey(bookId));
+      final raw = await WebBookStore.get(_chaptersKey(bookId));
       if (raw == null || raw.isEmpty) return [];
       final list = jsonDecode(raw) as List<dynamic>;
       return list
@@ -210,8 +207,7 @@ class LibraryRepository {
 
   Future<Map<String, dynamic>?> loadBookMeta(String bookId) async {
     if (kIsWeb) {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_metaKey(bookId));
+      final raw = await WebBookStore.get(_metaKey(bookId));
       if (raw == null || raw.isEmpty) return null;
       return jsonDecode(raw) as Map<String, dynamic>;
     }
@@ -224,8 +220,7 @@ class LibraryRepository {
   Future<String> loadChapterText(String bookId, ChapterRef chapter) async {
     if (chapter.isRemote) {
       if (kIsWeb) {
-        final prefs = await SharedPreferences.getInstance();
-        final cached = prefs.getString(_cacheKey(bookId, chapter.index));
+        final cached = await WebBookStore.get(_cacheKey(bookId, chapter.index));
         if (cached != null && cached.isNotEmpty) return cached.trim();
       } else {
         final dir = await _bookDirPath(bookId);
@@ -255,8 +250,7 @@ class LibraryRepository {
         chapterUrl: chapter.url!,
       );
       if (kIsWeb) {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString(_cacheKey(bookId, chapter.index), text);
+        await WebBookStore.put(_cacheKey(bookId, chapter.index), text);
       } else {
         final dir = await _bookDirPath(bookId);
         await fs.fsWriteString(
@@ -269,8 +263,7 @@ class LibraryRepository {
 
     String? full;
     if (kIsWeb) {
-      final prefs = await SharedPreferences.getInstance();
-      full = prefs.getString(_contentKey(bookId));
+      full = await WebBookStore.get(_contentKey(bookId));
     } else {
       final dir = await _bookDirPath(bookId);
       full = await fs.fsReadString(p.join(dir, 'content.txt'));
@@ -421,13 +414,12 @@ class LibraryRepository {
     ];
     await _writeChapters(bookId, chapters);
 
-    final prefs = await SharedPreferences.getInstance();
     for (final old in oldChapters) {
       final newUrl =
           old.index < chapters.length ? chapters[old.index].url : null;
       if (newUrl != old.url) {
         if (kIsWeb) {
-          await prefs.remove(_cacheKey(bookId, old.index));
+          await WebBookStore.delete(_cacheKey(bookId, old.index));
         } else {
           final dir = await _bookDirPath(bookId);
           await fs.fsDeleteRecursive(p.join(dir, 'cache'));
@@ -472,14 +464,12 @@ class LibraryRepository {
     await _saveBooks(books);
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_bookmarksKey(bookId));
-    await prefs.remove(_contentKey(bookId));
-    await prefs.remove(_chaptersKey(bookId));
-    await prefs.remove(_metaKey(bookId));
-    final keys = prefs.getKeys().where((k) => k.startsWith('inkshelf.cache.$bookId.'));
-    for (final key in keys) {
-      await prefs.remove(key);
-    }
-    if (!kIsWeb) {
+    if (kIsWeb) {
+      await WebBookStore.delete(_contentKey(bookId));
+      await WebBookStore.delete(_chaptersKey(bookId));
+      await WebBookStore.delete(_metaKey(bookId));
+      await WebBookStore.deletePrefix('inkshelf.cache.$bookId.');
+    } else {
       final root = await fs.fsBooksRootPath();
       await fs.fsDeleteRecursive(p.join(root, bookId));
     }
