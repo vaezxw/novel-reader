@@ -54,39 +54,109 @@ class RuleSelector {
     return r.trim();
   }
 
-  static (String selector, String attr) splitRule(String rule) {
+  static const _attrs = {
+    'text',
+    'textnodes',
+    'owntext',
+    'html',
+    'href',
+    'src',
+    'content',
+    'value',
+    'alt',
+    'title',
+  };
+
+  /// Splits Legado `@` chains: `.bookdesc@a@href` → [`.bookdesc`, `a`, `href`].
+  static List<String> splitAtChain(String rule) {
     final (base, _) = splitAllInOne(rule);
-    final at = base.lastIndexOf('@');
-    if (at <= 0) return (normalizeCss(base), 'text');
-    final left = base.substring(0, at).trim();
-    final right = base.substring(at + 1).trim().toLowerCase();
-    if (left.isEmpty) return ('', right);
-    return (normalizeCss(left), right);
+    if (base.trim().isEmpty) return const [];
+    return base
+        .split('@')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+  }
+
+  /// `span.0` / `.desc.1` → selector + optional index (Legado nth match).
+  static (String selector, int? index) splitIndexed(String part) {
+    final raw = part.trim();
+    final m = RegExp(r'^(.*)\.(\d+)$').firstMatch(raw);
+    if (m == null) return (normalizeCss(raw), null);
+    final left = m.group(1)!.trim();
+    if (left.isEmpty) return (normalizeCss(raw), null);
+    return (normalizeCss(left), int.parse(m.group(2)!));
+  }
+
+  static (String selector, String attr) splitRule(String rule) {
+    final parts = splitAtChain(rule);
+    if (parts.isEmpty) return ('', 'text');
+    if (parts.length == 1) {
+      final (sel, _) = splitIndexed(parts.first);
+      return (sel, 'text');
+    }
+    final last = parts.last.toLowerCase();
+    if (_attrs.contains(last)) {
+      // Only first segment for backward-compatible single-step callers.
+      final (sel, _) = splitIndexed(parts.first);
+      return (sel, last);
+    }
+    final (sel, _) = splitIndexed(parts.first);
+    return (sel, 'text');
   }
 
   static List<Element> selectList(Document doc, String? bookListRule) {
     if (bookListRule == null || bookListRule.trim().isEmpty) return const [];
-    final (selector, _) = splitRule(bookListRule);
+    final parts = splitAtChain(bookListRule);
+    if (parts.isEmpty) return const [];
+    final first = parts.first;
+    final (selector, index) = splitIndexed(first);
     if (selector.isEmpty) return const [];
     try {
-      return doc.querySelectorAll(selector);
+      final all = doc.querySelectorAll(selector);
+      if (index != null) {
+        if (index < 0 || index >= all.length) return const [];
+        return [all[index]];
+      }
+      return all;
     } catch (_) {
       return const [];
+    }
+  }
+
+  static Element? _step(Element root, String part) {
+    final (selector, index) = splitIndexed(part);
+    if (selector.isEmpty || selector == 'text') return root;
+    try {
+      if (index != null) {
+        final all = root.querySelectorAll(selector);
+        if (index < 0 || index >= all.length) return null;
+        return all[index];
+      }
+      return root.querySelector(selector);
+    } catch (_) {
+      return null;
     }
   }
 
   static String readFromElement(Element root, String? rule) {
     if (rule == null || rule.trim().isEmpty) return '';
     final (base, replaces) = splitAllInOne(rule);
-    final (selector, attr) = splitRule(base);
+    final parts = splitAtChain(base);
+    if (parts.isEmpty) return '';
+
+    var attr = 'text';
+    var selectors = parts;
+    final last = parts.last.toLowerCase();
+    if (_attrs.contains(last)) {
+      attr = last;
+      selectors = parts.sublist(0, parts.length - 1);
+    }
+
     Element? node = root;
-    if (selector.isNotEmpty) {
-      try {
-        node = root.querySelector(selector) ??
-            (selector == 'text' ? root : null);
-      } catch (_) {
-        node = null;
-      }
+    for (final sel in selectors) {
+      if (node == null) return '';
+      node = _step(node, sel);
     }
     if (node == null) return '';
     return applyReplaces(_attr(node, attr), replaces);
@@ -95,16 +165,43 @@ class RuleSelector {
   static String readFromDocument(Document doc, String? rule) {
     if (rule == null || rule.trim().isEmpty) return '';
     final (base, replaces) = splitAllInOne(rule);
-    final (selector, attr) = splitRule(base);
+    final parts = splitAtChain(base);
+    if (parts.isEmpty) return '';
+
+    var attr = 'text';
+    var selectors = parts;
+    final last = parts.last.toLowerCase();
+    if (_attrs.contains(last)) {
+      attr = last;
+      selectors = parts.sublist(0, parts.length - 1);
+    }
+
+    if (selectors.isEmpty) {
+      final node = doc.body ?? doc.documentElement;
+      if (node == null) return '';
+      return applyReplaces(_attr(node, attr), replaces);
+    }
+
+    // First step from Document (so <head> meta etc. work).
+    final first = selectors.first;
+    final (css, index) = splitIndexed(first);
     Element? node;
-    if (selector.isEmpty) {
-      node = doc.body;
-    } else {
-      try {
-        node = doc.querySelector(selector);
-      } catch (_) {
-        node = null;
+    try {
+      if (css.isEmpty) {
+        node = doc.body ?? doc.documentElement;
+      } else if (index != null) {
+        final all = doc.querySelectorAll(css);
+        node = (index >= 0 && index < all.length) ? all[index] : null;
+      } else {
+        node = doc.querySelector(css);
       }
+    } catch (_) {
+      node = null;
+    }
+
+    for (final sel in selectors.skip(1)) {
+      if (node == null) return '';
+      node = _step(node, sel);
     }
     if (node == null) return '';
     return applyReplaces(_attr(node, attr), replaces);

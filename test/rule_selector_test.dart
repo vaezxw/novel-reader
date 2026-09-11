@@ -102,4 +102,36 @@ void main() {
     ''';
     expect(RuleSelector.resolveNextUrl(doc, js), '/c/2.html');
   });
+
+  test('chained @ and indexed selectors (legado)', () {
+    final doc = RuleSelector.parseHtml('''
+      <div class="listitem">
+        <img src="/c.jpg" />
+        <div class="bookdesc">
+          <a href="/book/1"><h2>斗罗大陆</h2></a>
+          <p class="sp"><span>作者：唐家三少</span><span>分类：玄幻</span></p>
+          <p class="desc">最新章节：第一章</p>
+          <p class="desc">简介：一段传奇</p>
+        </div>
+      </div>
+    ''');
+    final item = doc.querySelector('.listitem')!;
+    expect(
+      RuleSelector.readFromElement(item, '.bookdesc@h2@text'),
+      '斗罗大陆',
+    );
+    expect(
+      RuleSelector.readFromElement(item, '.bookdesc@a@href'),
+      '/book/1',
+    );
+    expect(
+      RuleSelector.readFromElement(item, '.sp@span.0@text##作者：'),
+      '唐家三少',
+    );
+    expect(
+      RuleSelector.readFromElement(item, '.desc.1@text##简介：'),
+      '一段传奇',
+    );
+    expect(RuleSelector.readFromElement(item, 'img@src'), '/c.jpg');
+  });
 }

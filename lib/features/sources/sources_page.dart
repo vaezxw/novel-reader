@@ -1,14 +1,15 @@
-import 'dart:io';
+import 'dart:async';
+import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../../data/source_engine.dart';
 import '../../data/source_models.dart';
 import '../../providers/library_providers.dart';
 import '../../widgets/empty_state.dart';
@@ -32,7 +33,9 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
   bool _exporting = false;
   List<SearchBookHit> _hits = const [];
   String? _searchError;
+  String? _searchProgress;
   _SearchMatchMode _matchMode = _SearchMatchMode.fuzzy;
+  int _searchGen = 0;
 
   @override
   void initState() {
@@ -51,22 +54,24 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
-  Future<void> _importFromPaste() async {
-    final controller = TextEditingController();
+  Future<void> _importFromPaste({String? initialText, String? hint}) async {
+    final controller = TextEditingController(text: initialText ?? '');
     final text = await showDialog<String>(
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: const Text('粘贴书源 JSON / 链接'),
+          title: const Text('粘贴书源 / 链接'),
           content: SizedBox(
             width: 420,
             child: TextField(
               controller: controller,
               maxLines: 12,
-              decoration: const InputDecoration(
-                hintText:
-                    '支持 JSON 对象/数组，或 Gitee/GitHub 的 raw/blob 链接',
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                hintText: hint ??
+                    (kIsWeb
+                        ? 'Web 下链接常被跨域拦截：请粘贴 JSON/plist 全文；或用 Android/Windows 客户端导入链接'
+                        : '支持 Legado JSON、站点 plist，或 Gitee/GitHub 链接'),
+                border: const OutlineInputBorder(),
               ),
             ),
           ),
@@ -90,16 +95,17 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
   Future<void> _importFromFile() async {
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
-      allowedExtensions: const ['json', 'txt'],
+      allowedExtensions: const ['json', 'txt', 'plist'],
+      withData: true,
     );
     if (result == null || result.files.isEmpty) return;
-    final path = result.files.single.path;
-    if (path == null) {
-      _toast('无法读取文件路径');
+    final file = result.files.single;
+    final bytes = file.bytes;
+    if (bytes != null) {
+      await _importText(utf8.decode(bytes, allowMalformed: true));
       return;
     }
-    final text = await File(path).readAsString();
-    await _importText(text);
+    _toast('无法读取文件内容');
   }
 
   Future<void> _importText(String text) async {
@@ -111,7 +117,23 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
       _tabs.animateTo(0);
     } catch (error) {
       if (!mounted) return;
-      _toast('导入失败：$error');
+      final msg = '$error';
+      final isCorsish = kIsWeb &&
+          (msg.contains('跨域') ||
+              msg.contains('XMLHttpRequest') ||
+              msg.contains('CORS') ||
+              msg.contains('浏览器无法'));
+      _toast(
+        isCorsish
+            ? '浏览器无法下载该链接，请粘贴文件正文'
+            : '导入失败：$error',
+      );
+      if (isCorsish) {
+        await _importFromPaste(
+          hint:
+              '请打开 Gitee 页面 → 打开文件 → 全选复制正文粘贴到这里（不要只贴链接）',
+        );
+      }
     } finally {
       if (mounted) setState(() => _importing = false);
     }
@@ -121,26 +143,17 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
     setState(() => _exporting = true);
     try {
       final json = await ref.read(sourcesProvider.notifier).exportJson();
-      if (copyOnly) {
-        await Clipboard.setData(ClipboardData(text: json));
-        if (!mounted) return;
+      await Clipboard.setData(ClipboardData(text: json));
+      if (!mounted) return;
+      if (copyOnly || kIsWeb) {
         _toast('已复制书源 JSON，可粘贴保存');
         return;
       }
 
-      final dir = await getApplicationDocumentsDirectory();
-      final stamp = DateTime.now()
-          .toIso8601String()
-          .replaceAll(':', '-')
-          .split('.')
-          .first;
-      final file = File(p.join(dir.path, 'inkshelf_sources_$stamp.json'));
-      await file.writeAsString(json, flush: true);
       await SharePlus.instance.share(
         ShareParams(
-          files: [XFile(file.path, mimeType: 'application/json')],
+          text: json,
           subject: 'InkShelf 书源导出',
-          text: '墨架书源备份，可在新安装后「从文件导入」或粘贴 JSON。',
         ),
       );
       if (!mounted) return;
@@ -175,50 +188,108 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
       _toast('请输入书名或关键词');
       return;
     }
-    final sources = (ref.read(sourcesProvider).value ?? [])
+    final allEnabled = (ref.read(sourcesProvider).value ?? [])
         .where((s) => s.enabled)
         .toList();
-    if (sources.isEmpty) {
+    if (allEnabled.isEmpty) {
       _toast('请先添加并启用至少一个书源');
       return;
     }
 
+    final sources = allEnabled
+        .where(
+          (s) => !SourceEngine.isUnsupportedSearchUrl(s.searchUrl),
+        )
+        .toList();
+    final skipped = allEnabled.length - sources.length;
+
+    final gen = ++_searchGen;
     setState(() {
       _searching = true;
       _searchError = null;
+      _searchProgress = '准备搜索 ${sources.length} 个书源…';
       _hits = const [];
     });
 
     final engine = ref.read(sourceEngineProvider);
     final hits = <SearchBookHit>[];
     final errors = <String>[];
-    for (final source in sources) {
-      try {
-        final part = await engine.search(source: source, keyword: keyword);
+    var done = 0;
+    const batchSize = 8;
+    const perSourceTimeout = Duration(seconds: 9);
+    const enoughHits = 40;
+
+    for (var i = 0; i < sources.length; i += batchSize) {
+      if (!mounted || gen != _searchGen) return;
+      if (_filterHits(hits, keyword).length >= enoughHits) break;
+
+      final batch = sources.skip(i).take(batchSize).toList();
+      final parts = await Future.wait(
+        batch.map((source) async {
+          try {
+            final part = await engine
+                .search(source: source, keyword: keyword)
+                .timeout(perSourceTimeout);
+            return (source.bookSourceName, part, null);
+          } on TimeoutException {
+            return (source.bookSourceName, const <SearchBookHit>[], '超时');
+          } catch (error) {
+            return (
+              source.bookSourceName,
+              const <SearchBookHit>[],
+              '$error',
+            );
+          }
+        }),
+      );
+
+      for (final (name, part, error) in parts) {
         hits.addAll(part);
-      } catch (error) {
-        errors.add('${source.bookSourceName}: $error');
+        if (error != null) errors.add('$name: $error');
       }
+      done += batch.length;
+
+      if (!mounted || gen != _searchGen) return;
+      final filteredSoFar = _filterHits(hits, keyword);
+      setState(() {
+        _hits = filteredSoFar;
+        _searchProgress =
+            '搜索中 $done/${sources.length} · 已找到 ${filteredSoFar.length}';
+      });
     }
 
+    if (!mounted || gen != _searchGen) return;
     final filtered = _filterHits(hits, keyword);
-
-    if (!mounted) return;
     setState(() {
       _searching = false;
+      _searchProgress = null;
       _hits = filtered;
       if (filtered.isEmpty && errors.isNotEmpty) {
-        _searchError = errors.take(2).join('\n');
+        final hint = kIsWeb
+            ? 'Web 端受跨域限制，公共代理常超时；请用 Android/Windows 客户端搜书。'
+            : (skipped > 0 ? '已跳过 $skipped 个含 JS 的书源。' : null);
+        _searchError = [
+          ...errors.take(2),
+          if (hint != null) hint,
+        ].join('\n');
       } else if (filtered.isEmpty && hits.isNotEmpty) {
         _searchError = _matchMode == _SearchMatchMode.exact
             ? '有结果但无精准匹配，可切换「模糊」再试'
             : null;
+      } else {
+        _searchError = null;
       }
     });
     if (filtered.isEmpty && errors.isEmpty && hits.isEmpty) {
-      _toast('没有搜到结果');
+      _toast(skipped > 0 ? '没有搜到结果（已跳过 $skipped 个 JS 书源）' : '没有搜到结果');
     } else if (filtered.isEmpty && hits.isNotEmpty) {
-      _toast('无匹配结果（已按${_matchMode == _SearchMatchMode.exact ? '精准' : '模糊'}过滤）');
+      _toast(
+        '无匹配结果（已按${_matchMode == _SearchMatchMode.exact ? '精准' : '模糊'}过滤）',
+      );
+    } else if (filtered.isEmpty && errors.isNotEmpty) {
+      _toast(kIsWeb ? '搜索失败（多为浏览器跨域限制）' : '搜索失败，请检查网络或书源');
+    } else if (filtered.isNotEmpty) {
+      _toast('找到 ${filtered.length} 条结果');
     }
   }
 
@@ -499,7 +570,7 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
                     ),
                     const Spacer(),
                     Text(
-                      '已启用书源全部参与',
+                      _searchProgress ?? '已启用书源全部参与',
                       style: GoogleFonts.notoSansSc(
                         fontSize: 11,
                         color: colors.onSurface.withValues(alpha: 0.4),
@@ -524,7 +595,9 @@ class _SourcesPageState extends ConsumerState<SourcesPage>
                     ? EmptyState(
                         icon: Icons.search,
                         title: '搜索网络书籍',
-                        body: '使用已启用的多个书源搜索；结果会标注来源书源。',
+                        body: kIsWeb
+                            ? '浏览器有跨域限制，公共代理国内常不可用。搜书请优先用 Android / Windows 客户端。'
+                            : '使用已启用的多个书源搜索；结果会标注来源书源。',
                       )
                     : ListView.separated(
                         itemCount: _hits.length,

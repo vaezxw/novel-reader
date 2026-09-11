@@ -1,20 +1,23 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 import 'rule_selector.dart';
 import 'source_models.dart';
 
 class SourceEngine {
-  SourceEngine({Dio? dio})
+  SourceEngine({Dio? dio, this.webCorsProxyPrefix})
       : _dio = dio ??
             Dio(
               BaseOptions(
-                connectTimeout: const Duration(seconds: 12),
-                receiveTimeout: const Duration(seconds: 20),
+                connectTimeout: const Duration(seconds: 8),
+                receiveTimeout: const Duration(seconds: 15),
                 responseType: ResponseType.plain,
                 followRedirects: true,
-                validateStatus: (code) => code != null && code >= 200 && code < 400,
+                validateStatus: (code) =>
+                    code != null && code >= 200 && code < 400,
                 headers: {
                   'User-Agent':
                       'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 '
@@ -26,7 +29,18 @@ class SourceEngine {
               ),
             );
 
+  /// Optional custom CORS proxy prefix for Flutter Web, e.g.
+  /// `https://your-worker.example/proxy?url=`
+  final String? webCorsProxyPrefix;
+
   final Dio _dio;
+
+  /// Public proxies are often blocked in CN; prefer a self-hosted prefix.
+  static const defaultWebCorsProxy = 'https://corsproxy.io/?url=';
+  static const _fallbackWebProxies = <String>[
+    'https://api.allorigins.win/raw?url=',
+    'https://api.codetabs.com/v1/proxy?quest=',
+  ];
 
   Future<List<SearchBookHit>> search({
     required BookSource source,
@@ -37,18 +51,29 @@ class SourceEngine {
     if (searchUrl == null || searchUrl.trim().isEmpty) {
       throw StateError('书源未配置 searchUrl');
     }
+    if (isUnsupportedSearchUrl(searchUrl)) {
+      throw StateError('书源搜索含 JS/复杂脚本，暂不支持');
+    }
     final rule = source.ruleSearch;
     if (rule == null) {
       throw StateError('书源未配置 ruleSearch');
     }
+    if (RuleSelector.looksLikeJs(rule['bookList'] as String?)) {
+      throw StateError('搜索列表规则含 JS，暂不支持');
+    }
 
-    final url = _buildUrl(
+    final spec = _buildRequest(
       base: source.bookSourceUrl,
       template: searchUrl,
       key: keyword,
       page: page,
     );
-    final body = await _getBody(url, source);
+    final body = await _requestBody(
+      spec,
+      source,
+      connectTimeout: const Duration(seconds: 6),
+      receiveTimeout: const Duration(seconds: 8),
+    );
     final bookListRule = rule['bookList'] as String?;
 
     if (RuleSelector.isJsonRule(bookListRule) ||
@@ -102,12 +127,23 @@ class SourceEngine {
             RuleSelector.readFromElement(node, rule['coverUrl'] as String?),
           ),
           bookUrl: _absUrl(
-                url,
+                spec.url,
                 RuleSelector.readFromElement(node, rule['bookUrl'] as String?),
               ) ??
               '',
         ),
     ].where((e) => e.name.isNotEmpty && e.bookUrl.isNotEmpty).toList();
+  }
+
+  static bool isUnsupportedSearchUrl(String? searchUrl) {
+    if (searchUrl == null) return true;
+    final t = searchUrl.trim().toLowerCase();
+    if (t.isEmpty) return true;
+    return t.contains('@js') ||
+        t.contains('<js>') ||
+        t.contains('{{url()') ||
+        t.contains('java.') ||
+        (t.contains('<js') && t.contains('</js>'));
   }
 
   Future<List<RemoteChapter>> fetchToc({
@@ -279,7 +315,19 @@ class SourceEngine {
     return out;
   }
 
-  Future<String> _getBody(String url, BookSource source) async {
+  Future<String> _getBody(String url, BookSource source) {
+    return _requestBody(
+      SearchRequestSpec(url: url, method: 'GET'),
+      source,
+    );
+  }
+
+  Future<String> _requestBody(
+    SearchRequestSpec spec,
+    BookSource source, {
+    Duration? connectTimeout,
+    Duration? receiveTimeout,
+  }) async {
     final headers = <String, dynamic>{};
     if (source.headerJson != null && source.headerJson!.trim().isNotEmpty) {
       try {
@@ -289,29 +337,191 @@ class SourceEngine {
         // ignore invalid header json
       }
     }
-    final response = await _dio.get<String>(url, options: Options(headers: headers));
+    headers.addAll(spec.headers);
+
+    final urls = <String>[];
+    if (kIsWeb) {
+      // Direct first (rare APIs allow CORS), then short-lived public proxies.
+      urls.add(spec.url);
+      final custom = webCorsProxyPrefix;
+      if (custom != null && custom.trim().isNotEmpty) {
+        urls.add(applyWebProxy(spec.url, prefix: custom.trim()));
+      }
+      urls.add(applyWebProxy(spec.url, prefix: defaultWebCorsProxy));
+      for (final p in _fallbackWebProxies) {
+        urls.add(applyWebProxy(spec.url, prefix: p));
+      }
+    } else {
+      urls.add(spec.url);
+    }
+
+    DioException? last;
+    for (final fetchUrl in urls) {
+      try {
+        final future = _execute(
+          fetchUrl,
+          spec,
+          headers,
+          receiveTimeout: receiveTimeout ??
+              (kIsWeb ? const Duration(seconds: 6) : const Duration(seconds: 15)),
+        );
+        final ceiling = kIsWeb
+            ? const Duration(seconds: 7)
+            : ((connectTimeout ?? const Duration(seconds: 8)) +
+                (receiveTimeout ?? const Duration(seconds: 15)));
+        return await future.timeout(ceiling);
+      } on DioException catch (e) {
+        last = e;
+      } on TimeoutException {
+        // try next candidate
+      }
+    }
+    if (last != null) {
+      throw StateError(_friendlyNetworkError(last, spec.url));
+    }
+    throw StateError(
+      kIsWeb
+          ? 'Web 跨域/代理不可用，请用 Android 或 Windows 客户端搜书'
+          : '请求超时: ${spec.url}',
+    );
+  }
+
+  Future<String> _execute(
+    String fetchUrl,
+    SearchRequestSpec spec,
+    Map<String, dynamic> headers, {
+    Duration? receiveTimeout,
+  }) async {
+    final options = Options(
+      headers: headers,
+      sendTimeout: const Duration(seconds: 6),
+      receiveTimeout: receiveTimeout ?? const Duration(seconds: 20),
+    );
+    // Dio BaseOptions connectTimeout isn't overridable per-request on all
+    // adapters; wrap with Future.timeout as a hard ceiling in the UI layer.
+    final Response<String> response;
+    if (spec.method == 'POST') {
+      response = await _dio.post<String>(
+        fetchUrl,
+        data: spec.body,
+        options: options.copyWith(
+          contentType: headers['Content-Type'] as String? ??
+              headers['content-type'] as String? ??
+              Headers.formUrlEncodedContentType,
+        ),
+      );
+    } else {
+      response = await _dio.get<String>(fetchUrl, options: options);
+    }
     return response.data ?? '';
   }
 
-  String _buildUrl({
+  String _friendlyNetworkError(DioException e, String url) {
+    if (kIsWeb) {
+      return 'Web 无法直连书源（跨域/代理超时）。请用 Android 或 Windows 客户端搜索。';
+    }
+    if (e.type == DioExceptionType.connectionTimeout ||
+        e.type == DioExceptionType.receiveTimeout ||
+        e.type == DioExceptionType.sendTimeout) {
+      return '连接超时';
+    }
+    if (e.response?.statusCode != null) {
+      return 'HTTP ${e.response!.statusCode}';
+    }
+    return e.message ?? e.toString();
+  }
+
+  /// Visible for tests.
+  static String applyWebProxy(String url, {String? prefix}) {
+    final p = prefix ?? defaultWebCorsProxy;
+    if (url.contains('corsproxy.io/') ||
+        url.contains('allorigins.win/') ||
+        url.contains('codetabs.com/')) {
+      return url;
+    }
+    if (url.startsWith(p)) return url;
+    return '$p${Uri.encodeComponent(url)}';
+  }
+
+  /// Parses Legado `url,{json options}` templates. Exposed for unit tests.
+  static SearchRequestSpec parseSearchTemplate({
     required String base,
     required String template,
     required String key,
     required int page,
   }) {
-    // Strip Legado option JSON suffix: url,{...}
-    var tpl = template;
-    final optionAt = tpl.indexOf(',{');
-    if (optionAt > 0) {
-      tpl = tpl.substring(0, optionAt);
+    var tpl = template.trim();
+    Map<String, dynamic> options = const {};
+    final optMatch = RegExp(r',(\{[\s\S]*\})\s*$').firstMatch(tpl);
+    if (optMatch != null) {
+      final optRaw = optMatch.group(1)!;
+      tpl = tpl.substring(0, optMatch.start).trim();
+      try {
+        final decoded = jsonDecode(optRaw);
+        if (decoded is Map<String, dynamic>) {
+          options = decoded;
+        } else if (decoded is Map) {
+          options = Map<String, dynamic>.from(decoded);
+        }
+      } catch (_) {
+        // keep empty options
+      }
     }
-    tpl = tpl
-        .replaceAll('{{key}}', Uri.encodeQueryComponent(key))
-        .replaceAll('{{page}}', '$page');
-    return _absUrl(base, tpl) ?? tpl;
+
+    String replaceVars(String input) {
+      return input
+          .replaceAll('{{key}}', Uri.encodeQueryComponent(key))
+          .replaceAll('{{page}}', '$page');
+    }
+
+    tpl = replaceVars(tpl);
+    final abs = _absUrlStatic(base, tpl) ?? tpl;
+
+    final method = ('${options['method'] ?? 'GET'}').toUpperCase().trim();
+    final headers = <String, String>{};
+    final rawHeaders = options['headers'];
+    if (rawHeaders is String && rawHeaders.trim().isNotEmpty) {
+      try {
+        final map = jsonDecode(rawHeaders) as Map<String, dynamic>;
+        map.forEach((k, v) => headers[k] = '$v');
+      } catch (_) {
+        // ignore invalid headers json
+      }
+    } else if (rawHeaders is Map) {
+      rawHeaders.forEach((k, v) => headers['$k'] = '$v');
+    }
+
+    String? body;
+    final rawBody = options['body'];
+    if (rawBody != null) {
+      body = replaceVars('$rawBody');
+    }
+
+    return SearchRequestSpec(
+      url: abs,
+      method: method == 'POST' ? 'POST' : 'GET',
+      body: body,
+      headers: headers,
+    );
   }
 
-  String? _absUrl(String base, String? maybe) {
+  SearchRequestSpec _buildRequest({
+    required String base,
+    required String template,
+    required String key,
+    required int page,
+  }) {
+    return parseSearchTemplate(
+      base: base,
+      template: template,
+      key: key,
+      page: page,
+    );
+  }
+
+  String? _absUrl(String base, String? maybe) => _absUrlStatic(base, maybe);
+
+  static String? _absUrlStatic(String base, String? maybe) {
     if (maybe == null) return null;
     final value = maybe.trim();
     if (value.isEmpty) return null;
@@ -322,5 +532,20 @@ class SourceEngine {
     return baseUri.resolve(value).toString();
   }
 
-  String? _nullIfEmpty(String value) => value.trim().isEmpty ? null : value.trim();
+  String? _nullIfEmpty(String value) =>
+      value.trim().isEmpty ? null : value.trim();
+}
+
+class SearchRequestSpec {
+  const SearchRequestSpec({
+    required this.url,
+    required this.method,
+    this.body,
+    this.headers = const {},
+  });
+
+  final String url;
+  final String method;
+  final String? body;
+  final Map<String, String> headers;
 }

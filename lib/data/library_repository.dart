@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -272,6 +273,51 @@ class LibraryRepository {
     final start = chapter.start.clamp(0, full.length);
     final end = chapter.end.clamp(start, full.length);
     return full.substring(start, end).trim();
+  }
+
+  /// Re-decode local TXT that was stored as latin1 mojibake (common on web).
+  /// Returns true if content/chapters were rewritten.
+  Future<bool> repairLocalEncodingIfNeeded(String bookId) async {
+    final book = await getBook(bookId);
+    if (book == null || book.origin != BookOrigin.local) return false;
+
+    String? full;
+    if (kIsWeb) {
+      full = await WebBookStore.get(_contentKey(bookId));
+    } else {
+      final dir = await _bookDirPath(bookId);
+      full = await fs.fsReadString(p.join(dir, 'content.txt'));
+    }
+    if (full == null || full.isEmpty) return false;
+
+    final repaired = await TextDecoder.repairIfMojibake(full);
+    if (repaired == null) return false;
+
+    await _writeContent(bookId, repaired);
+    final splits = ChapterSplitter.split(repaired);
+    final chapters = <ChapterRef>[
+      for (var i = 0; i < splits.length; i++)
+        ChapterRef(
+          index: i,
+          title: splits[i].title,
+          start: splits[i].start,
+          end: splits[i].end,
+        ),
+    ];
+    await _writeChapters(bookId, chapters);
+
+    final books = await loadBooks();
+    final idx = books.indexWhere((b) => b.id == bookId);
+    if (idx >= 0) {
+      final old = books[idx];
+      books[idx] = old.copyWith(
+        chapterCount: chapters.length,
+        lastChapterIndex:
+            old.lastChapterIndex.clamp(0, math.max(0, chapters.length - 1)),
+      );
+      await _saveBooks(books);
+    }
+    return true;
   }
 
   Future<Book> importTxtFile({

@@ -125,13 +125,16 @@ final bookmarksProvider =
   return ref.read(libraryRepositoryProvider).loadBookmarks(bookId);
 });
 
-Future<void> toggleBookmarkForBook(
+Future<bool> toggleBookmarkForBook(
   WidgetRef ref, {
   required String bookId,
   required int chapterIndex,
   required String title,
   double scrollOffset = 0,
 }) async {
+  final before =
+      await ref.read(libraryRepositoryProvider).loadBookmarks(bookId);
+  final wasOn = before.any((b) => b.chapterIndex == chapterIndex);
   await ref.read(libraryRepositoryProvider).toggleBookmark(
         bookId: bookId,
         chapterIndex: chapterIndex,
@@ -139,6 +142,7 @@ Future<void> toggleBookmarkForBook(
         scrollOffset: scrollOffset,
       );
   ref.invalidate(bookmarksProvider(bookId));
+  return !wasOn;
 }
 
 Future<void> removeBookmarkForBook(

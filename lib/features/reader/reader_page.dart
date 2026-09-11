@@ -27,7 +27,7 @@ class ReaderPage extends ConsumerStatefulWidget {
 class _ReaderPageState extends ConsumerState<ReaderPage> {
   final _scrollController = ScrollController();
   final _pageFlipKey = GlobalKey<PageFlipViewState>();
-  final _tts = FlutterTts();
+  FlutterTts? _tts;
 
   bool _chromeVisible = false;
   int _chapterIndex = 0;
@@ -43,15 +43,20 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   @override
   void initState() {
     super.initState();
-    _initTts();
+    if (!kIsWeb) {
+      _tts = FlutterTts();
+      _initTts();
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) => _bootstrap());
   }
 
   Future<void> _initTts() async {
+    final tts = _tts;
+    if (tts == null) return;
     try {
-      await _tts.setLanguage('zh-CN');
-      await _tts.setSpeechRate(0.48);
-      _tts.setCompletionHandler(() {
+      await tts.setLanguage('zh-CN');
+      await tts.setSpeechRate(0.48);
+      tts.setCompletionHandler(() {
         if (!mounted) return;
         setState(() => _ttsSpeaking = false);
         _goChapter(_chapterIndex + 1).then((_) {
@@ -59,7 +64,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
         });
       });
     } catch (_) {
-      // Web / unsupported platforms
+      // Unsupported platforms
     }
   }
 
@@ -67,7 +72,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   void dispose() {
     _autoTimer?.cancel();
     _persistProgress();
-    _tts.stop();
+    _tts?.stop();
     _restoreBrightness();
     _scrollController.dispose();
     super.dispose();
@@ -89,8 +94,11 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       });
       return;
     }
-    final chapters =
-        await ref.read(libraryRepositoryProvider).loadChapters(book.id);
+    final repo = ref.read(libraryRepositoryProvider);
+    await repo.repairLocalEncodingIfNeeded(book.id);
+    // Reload book after possible chapterCount fix.
+    book = await repo.getBook(book.id) ?? book;
+    final chapters = await repo.loadChapters(book.id);
     _book = book;
     _chapters = chapters;
     _chapterIndex =
@@ -157,7 +165,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       return;
     }
     await _persistProgress();
-    if (_ttsSpeaking) await _tts.stop();
+    if (_ttsSpeaking) await _tts?.stop();
     setState(() {
       _chapterIndex = index;
       _ttsSpeaking = false;
@@ -200,7 +208,7 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     final chapter = _chapters[_chapterIndex];
     final offset =
         _scrollController.hasClients ? _scrollController.offset : 0.0;
-    await toggleBookmarkForBook(
+    final on = await toggleBookmarkForBook(
       ref,
       bookId: widget.bookId,
       chapterIndex: _chapterIndex,
@@ -208,8 +216,6 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
       scrollOffset: offset,
     );
     if (!mounted) return;
-    final marks = ref.read(bookmarksProvider(widget.bookId)).value ?? [];
-    final on = marks.any((b) => b.chapterIndex == _chapterIndex);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(on ? '已添加书签' : '已取消书签')),
     );
@@ -281,8 +287,15 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   }
 
   Future<void> _toggleTts() async {
+    if (kIsWeb || _tts == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('浏览器暂不支持听书，请用手机 App')),
+      );
+      return;
+    }
     if (_ttsSpeaking) {
-      await _tts.stop();
+      await _tts!.stop();
       setState(() => _ttsSpeaking = false);
       return;
     }
@@ -297,11 +310,12 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
   }
 
   Future<void> _startTts() async {
+    final tts = _tts;
     final text = _chapterText;
-    if (text == null || text.isEmpty) return;
+    if (tts == null || text == null || text.isEmpty) return;
     try {
       setState(() => _ttsSpeaking = true);
-      await _tts.speak(text);
+      await tts.speak(text);
     } catch (error) {
       setState(() => _ttsSpeaking = false);
       if (mounted) {
@@ -598,39 +612,40 @@ class _ReaderPageState extends ConsumerState<ReaderPage> {
     required Color muted,
     required Color lamp,
   }) {
-    switch (prefs.readMode) {
-      case ReadMode.pageFlip:
-        return PageFlipView(
-          key: _pageFlipKey,
-          text: _chapterText ?? '',
-          title: chapterTitle,
-          style: bodyStyle,
-          titleStyle: titleStyle,
-          onTapCenter: _toggleChrome,
-          // Chapter change is button-only; auto-read may still advance chapter.
-          onPrevChapter: () => _goChapter(_chapterIndex - 1),
-          onNextChapter: () => _goChapter(_chapterIndex + 1),
-          allowGestureChapterChange: false,
-        );
-      case ReadMode.verticalScroll:
-        return GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapUp: (_) => _toggleChrome(),
-          child: _VerticalChapterContent(
-            scrollController: _scrollController,
-            title: chapterTitle,
-            titleStyle: titleStyle,
-            body: _chapterText ?? '',
-            bodyStyle: bodyStyle,
-            muted: muted,
-            lamp: lamp,
-            chapterIndex: _chapterIndex,
-            chapterCount: _chapters.length,
-            onPrev: () => _goChapter(_chapterIndex - 1),
-            onNext: () => _goChapter(_chapterIndex + 1),
-          ),
-        );
+    // Browser: skip pageFlip (sync TextPainter pagination can abort WASM).
+    final useFlip = prefs.readMode == ReadMode.pageFlip && !kIsWeb;
+
+    if (useFlip) {
+      return PageFlipView(
+        key: _pageFlipKey,
+        text: _chapterText ?? '',
+        title: chapterTitle,
+        style: bodyStyle,
+        titleStyle: titleStyle,
+        onTapCenter: _toggleChrome,
+        onPrevChapter: () => _goChapter(_chapterIndex - 1),
+        onNextChapter: () => _goChapter(_chapterIndex + 1),
+        allowGestureChapterChange: false,
+      );
     }
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTapUp: (_) => _toggleChrome(),
+      child: _VerticalChapterContent(
+        scrollController: _scrollController,
+        title: chapterTitle,
+        titleStyle: titleStyle,
+        body: _chapterText ?? '',
+        bodyStyle: bodyStyle,
+        muted: muted,
+        lamp: lamp,
+        chapterIndex: _chapterIndex,
+        chapterCount: _chapters.length,
+        onPrev: () => _goChapter(_chapterIndex - 1),
+        onNext: () => _goChapter(_chapterIndex + 1),
+      ),
+    );
   }
 }
 
@@ -663,13 +678,25 @@ class _VerticalChapterContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Chunk long chapters so one TextPainter never owns the whole string (web-safe).
+    const chunkSize = 2400;
+    final bodyChunks = <Widget>[];
+    if (body.isEmpty) {
+      bodyChunks.add(Text('', style: bodyStyle));
+    } else {
+      for (var i = 0; i < body.length; i += chunkSize) {
+        final end = (i + chunkSize).clamp(0, body.length);
+        bodyChunks.add(Text(body.substring(i, end), style: bodyStyle));
+      }
+    }
+
     return ListView(
       controller: scrollController,
       padding: const EdgeInsets.fromLTRB(22, 28, 22, 48),
       children: [
         Text(title, style: titleStyle),
         const SizedBox(height: 18),
-        Text(body, style: bodyStyle),
+        ...bodyChunks,
         const SizedBox(height: 36),
         Row(
           children: [
